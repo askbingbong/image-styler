@@ -1,120 +1,87 @@
 (() => {
 'use strict';
 
-/* ---------- helpers ---------- */
+/* ================= helpers ================= */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const hexToRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
 const rgbToHex = (r, g, b) => '#' + [r, g, b].map(v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('');
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-function hslToHex(h, s, l) {
-  const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
-  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  return rgbToHex(f(0) * 255, f(8) * 255, f(4) * 255);
+function hsvToRgb(h, s, v) {
+  const f = n => { const k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); };
+  return [f(5) * 255, f(3) * 255, f(1) * 255];
+}
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn; let h = 0;
+  if (d) h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, mx ? d / mx : 0, mx];
+}
+const hsvHex = (h, s, v) => rgbToHex(...hsvToRgb(h, s, v));
+const hslHex = (h, s, l) => { const v = l + s * Math.min(l, 1 - l); return hsvHex(h, v ? 2 * (1 - l / v) : 0, v); };
+const ramp = (h, n = 6, s = .8) => Array.from({ length: n }, (_, i) => hslHex(h, s * (.55 + .45 * Math.sin(Math.PI * (i / (n - 1)))), .05 + .9 * i / (n - 1)));
+const uid = () => Math.random().toString(36).slice(2, 8);
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, w); c.height = Math.max(1, h); return c; };
+function h(tag, props = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (k === 'style') e.style.cssText = v;
+    else if (v === true) e.setAttribute(k, '');
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null) e.append(c.nodeType ? c : document.createTextNode(c));
+  return e;
 }
 
-/* ---------- palettes & defaults ---------- */
+/* ================= palettes ================= */
 const PRESETS = {
   'Sunset': ['#1b1035', '#5b2a86', '#c13584', '#ff5e6c', '#ff9a5a', '#ffe7a3'],
-  'Game Boy': ['#0f380f', '#306230', '#8bac0f', '#9bbc0f'],
-  'Noir': ['#000000', '#3a3a3a', '#8a8a8a', '#d9d9d9', '#ffffff'],
+  'Red': ramp(355, 6, .9),
+  'Blood Moon': ['#0a0003', '#3b0012', '#7a0a1c', '#c4161c', '#ff4d3a', '#ffd9c9'],
+  'Orange': ramp(25, 6, .95),
+  'Gold': ['#1a1203', '#4a3408', '#8f6a14', '#d4a62a', '#f7d96b', '#fff6d6'],
+  'Matrix': ['#000000', '#00260b', '#006b22', '#00c53a', '#7dff9a', '#eafff0'],
+  'Teal': ramp(175, 6, .85),
+  'Ice Blue': ['#03045e', '#0077b6', '#00b4d8', '#90e0ef', '#caf0f8', '#ffffff'],
+  'Deep Blue': ramp(225, 6, .9),
+  'Purple': ramp(275, 6, .85),
+  'Hot Pink': ramp(330, 6, .95),
   'Neon': ['#0b0021', '#2d00f7', '#8900f2', '#f20089', '#00f5d4', '#fff75e'],
+  'Vaporwave': ['#1a0933', '#ff71ce', '#b967ff', '#01cdfe', '#05ffa1', '#fffb96'],
   'Pastel': ['#2b2d42', '#8d99ae', '#cdb4db', '#ffafcc', '#bde0fe', '#fdf6e3'],
+  'Game Boy': ['#0f380f', '#306230', '#8bac0f', '#9bbc0f'],
+  'Virtual Boy': ['#000000', '#550000', '#aa0000', '#ff0000'],
   'CGA': ['#000000', '#55ffff', '#ff55ff', '#ffffff'],
+  'Noir': ['#000000', '#3a3a3a', '#8a8a8a', '#d9d9d9', '#ffffff'],
+  'Sepia': ['#1b1008', '#4a2f1a', '#85603a', '#c19a6b', '#ecd9b5', '#fff8e7'],
   'Forest': ['#0b1d16', '#1f4d3a', '#3f7d4e', '#9bc268', '#f1e9b8'],
-  'Rust': ['#1a0f0a', '#4a2511', '#8c4a1f', '#d98a3d', '#f4d58d', '#fff8e7'],
-  'Ice': ['#03045e', '#0077b6', '#00b4d8', '#90e0ef', '#caf0f8', '#ffffff'],
-  'Rainbow 16': Array.from({ length: 16 }, (_, i) => hslToHex(i * 22.5, .85, .55)),
+  'Rainbow 16': Array.from({ length: 16 }, (_, i) => hslHex(i * 22.5, .85, .55)),
 };
-const DEFAULTS = () => ({
-  maxDim: 1200,
-  palette: PRESETS['Sunset'].slice(),
-  posterize: { on: true },
-  noise: { on: true, amount: 30, size: 1, mono: true, seed: 1 },
-  pixel: { on: true, size: 4, compress: true, quality: 30, passes: 2 },
-  dither: { on: true, method: 'cross', strength: 70, scale: 2 },
-});
-let state = DEFAULTS();
+const presetName = pal => Object.keys(PRESETS).find(k => PRESETS[k].join() === pal.join());
 
-const getPath = (o, p) => p.split('.').reduce((a, k) => a[k], o);
-const setPath = (o, p, v) => { const ks = p.split('.'), l = ks.pop(); ks.reduce((a, k) => a[k], o)[l] = v; };
-function merge(base, extra) {
-  if (!extra || typeof extra !== 'object') return base;
-  for (const k of Object.keys(base)) {
-    if (!(k in extra)) continue;
-    if (Array.isArray(base[k])) { if (Array.isArray(extra[k]) && extra[k].length >= 3 && extra[k].length <= 16) base[k] = extra[k].slice(); }
-    else if (base[k] && typeof base[k] === 'object') merge(base[k], extra[k]);
-    else if (typeof extra[k] === typeof base[k]) base[k] = extra[k];
-  }
-  return base;
+/* ================= effect library ================= */
+const R = (k, label, min, max, step, def) => ({ t: 'range', k, label, min, max, step, def });
+const S = (k, label, opts, def) => ({ t: 'select', k, label, opts, def });
+const C = (k, label, def) => ({ t: 'check', k, label, def });
+const PAL = { t: 'palette', k: 'palette' };
+const SEED = { t: 'seed', k: 'seed', def: 1 };
+
+function px(cv, fn) {
+  const g = cv.getContext('2d', { willReadFrequently: true }), id = g.getImageData(0, 0, cv.width, cv.height);
+  fn(id); g.putImageData(id, 0, 0);
 }
-
-/* ---------- persistent storage (IndexedDB) ---------- */
-const dbp = (() => {
-  try {
-    return new Promise((res, rej) => {
-      const r = indexedDB.open('image-styler', 1);
-      r.onupgradeneeded = () => r.result.createObjectStore('kv');
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    });
-  } catch (e) { return Promise.reject(e); }
-})();
-dbp.catch(() => { $('#storeHint').textContent = 'Storage unavailable in this browser mode — changes will not be remembered.'; });
-const kv = (mode, fn) => dbp.then(db => new Promise((res, rej) => {
-  const q = fn(db.transaction('kv', mode).objectStore('kv'));
-  q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
-}));
-const kvGet = k => kv('readonly', s => s.get(k)).catch(() => undefined);
-const kvSet = (k, v) => kv('readwrite', s => s.put(v, k)).catch(() => {});
-try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
-
-let saveTimer;
-const saveSettings = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => kvSet('settings', state), 300); };
-
-/* ---------- image source ---------- */
-let srcBitmap = null;   // full-res decoded image
-let srcName = 'image';
-let src = null;         // canvas, downscaled to maxDim
-
-async function loadBlob(blob, name, persist = true) {
-  let bmp;
-  try { bmp = await createImageBitmap(blob); }
-  catch (e) { alert('Could not read that image.'); return; }
-  srcBitmap = bmp; srcName = (name || 'image').replace(/\.[^.]+$/, '');
-  if (persist) kvSet('image', { blob, name: srcName });
-  buildSrc();
-  $('#drop').hidden = true; $('#canvasWrap').hidden = false;
-  $('#btnDownload').disabled = false;
-  schedule();
+function copyOf(cv) { const c = mk(cv.width, cv.height); c.getContext('2d').drawImage(cv, 0, 0); return c; }
+function down(cv, s) {
+  const t = mk(Math.ceil(cv.width / s), Math.ceil(cv.height / s)), g = t.getContext('2d');
+  g.imageSmoothingQuality = 'high'; g.drawImage(cv, 0, 0, cv.width, cv.height, 0, 0, t.width, t.height); return t;
 }
-function buildSrc() {
-  if (!srcBitmap) return;
-  const m = Math.max(srcBitmap.width, srcBitmap.height), sc = Math.min(1, state.maxDim / m);
-  const w = Math.max(1, Math.round(srcBitmap.width * sc)), h = Math.max(1, Math.round(srcBitmap.height * sc));
-  src = document.createElement('canvas'); src.width = w; src.height = h;
-  const c = src.getContext('2d'); c.imageSmoothingQuality = 'high'; c.drawImage(srcBitmap, 0, 0, w, h);
+function up(t, cv, s) {
+  const g = cv.getContext('2d'); g.imageSmoothingEnabled = false;
+  g.drawImage(t, 0, 0, t.width, t.height, 0, 0, t.width * s, t.height * s);
 }
-function makeSample() {
-  const c = document.createElement('canvas'); c.width = 900; c.height = 600;
-  const g = c.getContext('2d');
-  const sky = g.createLinearGradient(0, 0, 0, 600);
-  sky.addColorStop(0, '#1a1a4e'); sky.addColorStop(.5, '#d6457a'); sky.addColorStop(1, '#ffc27a');
-  g.fillStyle = sky; g.fillRect(0, 0, 900, 600);
-  const sun = g.createRadialGradient(450, 330, 10, 450, 330, 190);
-  sun.addColorStop(0, '#fffbe0'); sun.addColorStop(.4, '#ffd36e'); sun.addColorStop(1, 'rgba(255,150,80,0)');
-  g.fillStyle = sun; g.beginPath(); g.arc(450, 330, 190, 0, 7); g.fill();
-  g.fillStyle = '#1b1530';
-  g.beginPath(); g.moveTo(0, 600); g.lineTo(0, 440);
-  for (let x = 0; x <= 900; x += 30) g.lineTo(x, 430 - 60 * Math.abs(Math.sin(x / 140)) - 30 * Math.sin(x / 47));
-  g.lineTo(900, 600); g.fill();
-  g.fillStyle = '#0c0a18'; g.fillRect(0, 520, 900, 80);
-  return new Promise(r => c.toBlob(r, 'image/png'));
-}
-
-/* ---------- effects ---------- */
-function paletteRgb() { return state.palette.map(hexToRgb); }
 function nearest(pal, r, g, b) {
   let best = 0, bd = 1e9;
   for (let i = 0; i < pal.length; i++) {
@@ -123,192 +90,356 @@ function nearest(pal, r, g, b) {
   }
   return best;
 }
-function posterize(data, pal) {
-  for (let i = 0; i < data.length; i += 4) {
-    const p = pal[nearest(pal, data[i], data[i + 1], data[i + 2])];
-    data[i] = p[0]; data[i + 1] = p[1]; data[i + 2] = p[2];
-  }
-}
-function addNoise(id, o) {
-  const { width: w, height: h, data } = id, rnd = mulberry32(o.seed), amp = o.amount / 100 * 255, s = o.size;
-  const gw = Math.ceil(w / s), gh = Math.ceil(h / s), ch = o.mono ? 1 : 3;
-  const grid = new Float32Array(gw * gh * ch);
-  for (let i = 0; i < grid.length; i++) grid[i] = (rnd() - .5) * 2 * amp;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const gi = ((y / s | 0) * gw + (x / s | 0)) * ch, i = (y * w + x) * 4;
-    data[i] = clamp(data[i] + grid[gi], 0, 255);
-    data[i + 1] = clamp(data[i + 1] + grid[ch === 1 ? gi : gi + 1], 0, 255);
-    data[i + 2] = clamp(data[i + 2] + grid[ch === 1 ? gi : gi + 2], 0, 255);
-  }
-}
-const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
-async function jpegPass(c, q) {
-  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', q));
-  if (!blob) return;
-  const bmp = await createImageBitmap(blob), g = c.getContext('2d');
-  g.drawImage(bmp, 0, 0); bmp.close && bmp.close();
-}
-async function pixelate(cv, o) {
-  const W = cv.width, H = cv.height, s = o.size;
-  const sw = Math.max(1, Math.ceil(W / s)), sh = Math.max(1, Math.ceil(H / s));
-  let small = cv;
-  if (s > 1) {
-    small = mk(sw, sh);
-    const g = small.getContext('2d'); g.imageSmoothingQuality = 'high';
-    g.drawImage(cv, 0, 0, W, H, 0, 0, sw, sh);
-  }
-  if (o.compress) {
-    // JPEG has no alpha: flatten to opaque first (all our pixels are opaque already)
-    for (let i = 0; i < o.passes; i++) await jpegPass(small, o.quality / 100);
-  }
-  if (s > 1) {
-    const g = cv.getContext('2d'); g.imageSmoothingEnabled = false;
-    g.drawImage(small, 0, 0, sw, sh, 0, 0, sw * s, sh * s);
-  }
-}
+const palRgb = p => p.palette.map(hexToRgb);
 
-// threshold matrices, values in [0,1)
+function boxBlurF(buf, w, hh, r) { // buf: Float32Array RGB interleaved
+  r = Math.max(1, Math.round(r));
+  let a = buf, b = new Float32Array(buf.length);
+  const n = 2 * r + 1;
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < hh; y++) for (let c = 0; c < 3; c++) {
+      let sum = 0; const base = y * w;
+      for (let i = -r; i <= r; i++) sum += a[(base + clamp(i, 0, w - 1)) * 3 + c];
+      for (let x = 0; x < w; x++) {
+        b[(base + x) * 3 + c] = sum / n;
+        sum += a[(base + Math.min(x + r + 1, w - 1)) * 3 + c] - a[(base + Math.max(x - r, 0)) * 3 + c];
+      }
+    }
+    for (let x = 0; x < w; x++) for (let c = 0; c < 3; c++) {
+      let sum = 0;
+      for (let i = -r; i <= r; i++) sum += b[(clamp(i, 0, hh - 1) * w + x) * 3 + c];
+      for (let y = 0; y < hh; y++) {
+        a[(y * w + x) * 3 + c] = sum / n;
+        sum += b[(Math.min(y + r + 1, hh - 1) * w + x) * 3 + c] - b[(Math.max(y - r, 0) * w + x) * 3 + c];
+      }
+    }
+  }
+  return a;
+}
+const toF = d => { const f = new Float32Array(d.length / 4 * 3); for (let i = 0, j = 0; i < d.length; i += 4, j += 3) { f[j] = d[i]; f[j + 1] = d[i + 1]; f[j + 2] = d[i + 2]; } return f; };
+
+// dither threshold matrices
 function bayer(n) {
   let m = [[0]];
   while (m.length < n) {
     const k = m.length, r = Array.from({ length: k * 2 }, () => new Array(k * 2));
     for (let y = 0; y < k; y++) for (let x = 0; x < k; x++) {
-      const v = m[y][x] * 4;
-      r[y][x] = v; r[y][x + k] = v + 2; r[y + k][x] = v + 3; r[y + k][x + k] = v + 1;
+      const v = m[y][x] * 4; r[y][x] = v; r[y][x + k] = v + 2; r[y + k][x] = v + 3; r[y + k][x + k] = v + 1;
     }
     m = r;
   }
   return { n, v: m.flat().map(v => (v + .5) / (n * n)) };
 }
 const B4 = bayer(4), B8 = bayer(8);
-const CROSS = (() => { // diagonal cross-hatch lines with a Bayer tie-break
+const CROSS = (() => {
   const n = 8, v = [];
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     const a = (x + y) % n, b = (x - y + n) % n;
-    const d = Math.min(Math.min(a, n - a), Math.min(b, n - b)); // 0..2
-    v.push((d + B8.v[y * n + x]) / 3);
+    v.push((Math.min(Math.min(a, n - a), Math.min(b, n - b)) + B8.v[y * n + x]) / 3);
   }
   return { n, v };
 })();
-
 function ditherData(id, pal, o) {
-  const { width: w, height: h, data } = id, str = o.strength / 100;
+  const { width: w, height: hh, data } = id, str = o.strength / 100;
   if (o.method === 'floyd' || o.method === 'atkinson') {
-    const buf = new Float32Array(w * h * 3);
-    for (let i = 0, j = 0; i < data.length; i += 4, j += 3) { buf[j] = data[i]; buf[j + 1] = data[i + 1]; buf[j + 2] = data[i + 2]; }
-    const fs = o.method === 'floyd';
+    const buf = toF(data), fs = o.method === 'floyd';
     const taps = fs ? [[1, 0, 7 / 16], [-1, 1, 3 / 16], [0, 1, 5 / 16], [1, 1, 1 / 16]]
-                    : [[1, 0, 1 / 8], [2, 0, 1 / 8], [-1, 1, 1 / 8], [0, 1, 1 / 8], [1, 1, 1 / 8], [0, 2, 1 / 8]];
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      : [[1, 0, 1 / 8], [2, 0, 1 / 8], [-1, 1, 1 / 8], [0, 1, 1 / 8], [1, 1, 1 / 8], [0, 2, 1 / 8]];
+    for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
       const j = (y * w + x) * 3, r = clamp(buf[j], 0, 255), g = clamp(buf[j + 1], 0, 255), b = clamp(buf[j + 2], 0, 255);
       const p = pal[nearest(pal, r, g, b)], er = (r - p[0]) * str, eg = (g - p[1]) * str, eb = (b - p[2]) * str;
       const i = (y * w + x) * 4; data[i] = p[0]; data[i + 1] = p[1]; data[i + 2] = p[2];
       for (const [dx, dy, wt] of taps) {
-        const nx = x + dx, ny = y + dy; if (nx < 0 || nx >= w || ny >= h) continue;
+        const nx = x + dx, ny = y + dy; if (nx < 0 || nx >= w || ny >= hh) continue;
         const k = (ny * w + nx) * 3; buf[k] += er * wt; buf[k + 1] += eg * wt; buf[k + 2] += eb * wt;
       }
     }
     return;
   }
-  const m = o.method === 'bayer4' ? B4 : o.method === 'bayer8' ? B8 : CROSS;
-  const spread = str * 200;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+  const m = o.method === 'bayer4' ? B4 : o.method === 'bayer8' ? B8 : CROSS, spread = str * 200;
+  for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
     const i = (y * w + x) * 4, t = (m.v[(y % m.n) * m.n + (x % m.n)] - .5) * spread;
     const p = pal[nearest(pal, data[i] + t, data[i + 1] + t, data[i + 2] + t)];
     data[i] = p[0]; data[i + 1] = p[1]; data[i + 2] = p[2];
   }
 }
-function dither(cv, pal, o) {
-  const s = o.scale, W = cv.width, H = cv.height;
-  const sw = Math.max(1, Math.ceil(W / s)), sh = Math.max(1, Math.ceil(H / s));
-  let t = cv;
-  if (s > 1) { t = mk(sw, sh); const g = t.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(cv, 0, 0, W, H, 0, 0, sw, sh); }
-  const g = t.getContext('2d'), id = g.getImageData(0, 0, t.width, t.height);
-  ditherData(id, pal, o); g.putImageData(id, 0, 0);
-  if (s > 1) { const c = cv.getContext('2d'); c.imageSmoothingEnabled = false; c.drawImage(t, 0, 0, sw, sh, 0, 0, sw * s, sh * s); }
+async function jpegPass(c, q) {
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', q)); if (!blob) return;
+  const bmp = await createImageBitmap(blob); c.getContext('2d').drawImage(bmp, 0, 0); bmp.close && bmp.close();
+}
+function wrapDraw(g, cp, sx, sy, sw, sh, dx, dy, vertical) { // draw strip shifted with wrap-around
+  const W = vertical ? cp.height : cp.width, d = Math.round(dx);
+  const at = o => vertical ? g.drawImage(cp, sx, sy, sw, sh, dy, o, sw, sh) : g.drawImage(cp, sx, sy, sw, sh, o, dy, sw, sh);
+  at(d); if (d > 0) at(d - W); else if (d < 0) at(d + W);
 }
 
-/* ---------- render pipeline ---------- */
+const TYPES = {
+  posterize: { name: 'Posterize', desc: 'Reduce to 3–16 colors you choose', hue: 330, params: [PAL],
+    run(cv, p) { const pal = palRgb(p); px(cv, id => { const d = id.data; for (let i = 0; i < d.length; i += 4) { const c = pal[nearest(pal, d[i], d[i + 1], d[i + 2])]; d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; } }); } },
+  noise: { name: 'Noise', desc: 'Film grain / static', hue: 200, params: [R('amount', 'Amount', 0, 100, 1, 30), R('size', 'Grain size', 1, 8, 1, 1), C('mono', 'Monochrome', true), SEED],
+    run(cv, p) { px(cv, id => {
+      const { width: w, height: hh, data } = id, rnd = mulberry32(p.seed), amp = p.amount / 100 * 255, s = p.size;
+      const gw = Math.ceil(w / s), gh = Math.ceil(hh / s), ch = p.mono ? 1 : 3, grid = new Float32Array(gw * gh * ch);
+      for (let i = 0; i < grid.length; i++) grid[i] = (rnd() - .5) * 2 * amp;
+      for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
+        const gi = ((y / s | 0) * gw + (x / s | 0)) * ch, i = (y * w + x) * 4;
+        data[i] += grid[gi]; data[i + 1] += grid[ch === 1 ? gi : gi + 1]; data[i + 2] += grid[ch === 1 ? gi : gi + 2];
+      } }); } },
+  pixelate: { name: 'Pixelate', desc: 'Chunky blocks', hue: 150, params: [R('size', 'Pixel size', 2, 48, 1, 4)],
+    run(cv, p) { const t = down(cv, p.size); up(t, cv, p.size); } },
+  compress: { name: 'JPEG compress', desc: 'Crunchy compression artifacts', hue: 35, params: [R('quality', 'Quality', 1, 100, 1, 30), R('passes', 'Passes', 1, 8, 1, 2), R('scale', 'Artifact size', 1, 16, 1, 4)],
+    async run(cv, p) { const s = p.scale, t = s > 1 ? down(cv, s) : cv; for (let i = 0; i < p.passes; i++) await jpegPass(t, p.quality / 100); if (s > 1) up(t, cv, s); } },
+  dither: { name: 'Dither', desc: 'Map to palette with patterns', hue: 270, params: [S('method', 'Style', [['cross', 'Cross-hatch'], ['bayer4', 'Bayer 4×4'], ['bayer8', 'Bayer 8×8'], ['floyd', 'Floyd–Steinberg'], ['atkinson', 'Atkinson']], 'cross'), R('strength', 'Strength', 0, 100, 1, 70), R('scale', 'Dither scale', 1, 8, 1, 2), PAL],
+    run(cv, p) { const pal = palRgb(p), s = p.scale, t = s > 1 ? down(cv, s) : cv; px(t, id => ditherData(id, pal, p)); if (s > 1) up(t, cv, s); } },
+  adjust: { name: 'Color adjust', desc: 'Brightness, contrast, saturation, hue', hue: 55, params: [R('brightness', 'Brightness', -100, 100, 1, 0), R('contrast', 'Contrast', -100, 100, 1, 0), R('saturation', 'Saturation', -100, 100, 1, 0), R('hue', 'Hue shift', 0, 360, 1, 0)],
+    run(cv, p) {
+      const a = p.hue * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
+      const m = [.213 + cs * .787 - sn * .213, .715 - cs * .715 - sn * .715, .072 - cs * .072 + sn * .928,
+        .213 - cs * .213 + sn * .143, .715 + cs * .285 + sn * .140, .072 - cs * .072 - sn * .283,
+        .213 - cs * .213 - sn * .787, .715 - cs * .715 + sn * .715, .072 + cs * .928 + sn * .072];
+      const c = p.contrast * 2.55, cf = 259 * (c + 255) / (255 * (259 - c)), sat = 1 + p.saturation / 100, br = p.brightness * 2.55;
+      px(cv, id => { const d = id.data; for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        let R2 = m[0] * r + m[1] * g + m[2] * b, G2 = m[3] * r + m[4] * g + m[5] * b, B2 = m[6] * r + m[7] * g + m[8] * b;
+        const l = .299 * R2 + .587 * G2 + .114 * B2;
+        R2 = l + (R2 - l) * sat; G2 = l + (G2 - l) * sat; B2 = l + (B2 - l) * sat;
+        d[i] = (R2 - 128) * cf + 128 + br; d[i + 1] = (G2 - 128) * cf + 128 + br; d[i + 2] = (B2 - 128) * cf + 128 + br;
+      } }); } },
+  invert: { name: 'Invert', desc: 'Flip the colors', hue: 0, params: [R('amount', 'Amount', 0, 100, 1, 100)],
+    run(cv, p) { const t = p.amount / 100; px(cv, id => { const d = id.data; for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) d[i + k] += (255 - 2 * d[i + k]) * t; }); } },
+  blur: { name: 'Blur', desc: 'Soften the image', hue: 210, params: [R('radius', 'Radius', 1, 40, 1, 4)],
+    run(cv, p) { px(cv, id => { const f = boxBlurF(toF(id.data), id.width, id.height, p.radius), d = id.data; for (let i = 0, j = 0; i < d.length; i += 4, j += 3) { d[i] = f[j]; d[i + 1] = f[j + 1]; d[i + 2] = f[j + 2]; } }); } },
+  glow: { name: 'Glow', desc: 'Bloom on bright areas', hue: 45, params: [R('threshold', 'Threshold', 0, 255, 1, 150), R('radius', 'Radius', 1, 50, 1, 12), R('strength', 'Strength', 0, 200, 1, 80)],
+    run(cv, p) { px(cv, id => {
+      const d = id.data, f = toF(d), k = p.strength / 100;
+      for (let j = 0; j < f.length; j += 3) { const l = .299 * f[j] + .587 * f[j + 1] + .114 * f[j + 2]; if (l < p.threshold) f[j] = f[j + 1] = f[j + 2] = 0; }
+      boxBlurF(f, id.width, id.height, p.radius);
+      for (let i = 0, j = 0; i < d.length; i += 4, j += 3) { d[i] += f[j] * k; d[i + 1] += f[j + 1] * k; d[i + 2] += f[j + 2] * k; }
+    }); } },
+  rgbshift: { name: 'RGB split', desc: 'Chromatic aberration', hue: 350, params: [R('amount', 'Distance', 0, 60, 1, 8), R('angle', 'Angle', 0, 360, 1, 0)],
+    run(cv, p) { px(cv, id => {
+      const { width: w, height: hh, data } = id, o = new Uint8ClampedArray(data), a = p.angle * Math.PI / 180;
+      const dx = Math.round(Math.cos(a) * p.amount), dy = Math.round(Math.sin(a) * p.amount);
+      for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        data[i] = o[(clamp(y + dy, 0, hh - 1) * w + clamp(x + dx, 0, w - 1)) * 4];
+        data[i + 2] = o[(clamp(y - dy, 0, hh - 1) * w + clamp(x - dx, 0, w - 1)) * 4 + 2];
+      } }); } },
+  glitch: { name: 'Glitch', desc: 'Torn horizontal slices', hue: 300, params: [R('slices', 'Slices', 1, 60, 1, 14), R('intensity', 'Intensity', 0, 100, 1, 40), SEED],
+    run(cv, p) { const cp = copyOf(cv), g = cv.getContext('2d'), rnd = mulberry32(p.seed), W = cv.width, H = cv.height;
+      for (let i = 0; i < p.slices; i++) { const y = rnd() * H | 0, sh = Math.max(1, (rnd() * H * .08 | 0) + 1), dx = (rnd() - .5) * 2 * p.intensity / 100 * W * .3;
+        wrapDraw(g, cp, 0, y, W, sh, dx, y, false); } } },
+  wave: { name: 'Wave warp', desc: 'Wobbly sine distortion', hue: 185, params: [R('amplitude', 'Amplitude', 0, 80, 1, 12), R('length', 'Wavelength', 10, 400, 1, 120), S('dir', 'Direction', [['h', 'Horizontal'], ['v', 'Vertical']], 'h')],
+    run(cv, p) { const cp = copyOf(cv), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+      if (p.dir === 'h') for (let y = 0; y < H; y++) wrapDraw(g, cp, 0, y, W, 1, Math.sin(y / p.length * 6.2832) * p.amplitude, y, false);
+      else for (let x = 0; x < W; x++) wrapDraw(g, cp, x, 0, 1, H, Math.sin(x / p.length * 6.2832) * p.amplitude, x, true); } },
+  scanlines: { name: 'Scanlines', desc: 'CRT-style lines', hue: 120, params: [R('spacing', 'Spacing', 2, 16, 1, 4), R('darkness', 'Darkness', 0, 100, 1, 45)],
+    run(cv, p) { const g = cv.getContext('2d'); g.fillStyle = `rgba(0,0,0,${p.darkness / 100})`; const t = Math.ceil(p.spacing / 2); for (let y = 0; y < cv.height; y += p.spacing) g.fillRect(0, y, cv.width, t); } },
+  vignette: { name: 'Vignette', desc: 'Darken the edges', hue: 250, params: [R('strength', 'Strength', 0, 100, 1, 70), R('size', 'Clear area', 0, 100, 1, 35)],
+    run(cv, p) { const g = cv.getContext('2d'), W = cv.width, H = cv.height, rr = Math.hypot(W, H) / 2;
+      const gr = g.createRadialGradient(W / 2, H / 2, rr * p.size / 100 * .9, W / 2, H / 2, rr);
+      gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, `rgba(0,0,0,${p.strength / 100})`); g.fillStyle = gr; g.fillRect(0, 0, W, H); } },
+  halftone: { name: 'Halftone', desc: 'Newspaper dots', hue: 10, params: [R('cell', 'Dot grid', 4, 32, 1, 10), C('color', 'Color dots', true), C('invert', 'Dark dots on paper', false)],
+    run(cv, p) {
+      const s = p.cell, t = down(cv, s), id = t.getContext('2d').getImageData(0, 0, t.width, t.height).data, g = cv.getContext('2d');
+      g.fillStyle = p.invert ? '#f4f1ea' : '#050505'; g.fillRect(0, 0, cv.width, cv.height);
+      for (let y = 0; y < t.height; y++) for (let x = 0; x < t.width; x++) {
+        const i = (y * t.width + x) * 4, r = id[i], gg = id[i + 1], b = id[i + 2], l = (.299 * r + .587 * gg + .114 * b) / 255;
+        const rad = Math.sqrt(p.invert ? 1 - l : l) * s * .72; if (rad < .3) continue;
+        g.fillStyle = p.color ? `rgb(${r},${gg},${b})` : p.invert ? '#111' : '#fff';
+        g.beginPath(); g.arc((x + .5) * s, (y + .5) * s, rad, 0, 6.2832); g.fill();
+      } } },
+  edges: { name: 'Edges', desc: 'Outline detection', hue: 90, params: [S('mode', 'Mode', [['overlay', 'Lines on image'], ['only', 'Edges only']], 'overlay'), R('strength', 'Strength', 0, 100, 1, 80)],
+    run(cv, p) { px(cv, id => {
+      const { width: w, height: hh, data: d } = id, L = new Float32Array(w * hh), k = p.strength / 100;
+      for (let i = 0; i < L.length; i++) L[i] = .299 * d[i * 4] + .587 * d[i * 4 + 1] + .114 * d[i * 4 + 2];
+      for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
+        const G = (xx, yy) => L[clamp(yy, 0, hh - 1) * w + clamp(xx, 0, w - 1)];
+        const gx = -G(x - 1, y - 1) - 2 * G(x - 1, y) - G(x - 1, y + 1) + G(x + 1, y - 1) + 2 * G(x + 1, y) + G(x + 1, y + 1);
+        const gy = -G(x - 1, y - 1) - 2 * G(x, y - 1) - G(x + 1, y - 1) + G(x - 1, y + 1) + 2 * G(x, y + 1) + G(x + 1, y + 1);
+        const e = Math.min(1, Math.hypot(gx, gy) / 200) * k, i = (y * w + x) * 4;
+        if (p.mode === 'only') d[i] = d[i + 1] = d[i + 2] = e * 255; else { d[i] *= 1 - e; d[i + 1] *= 1 - e; d[i + 2] *= 1 - e; }
+      } }); } },
+};
+const TYPE_KEYS = Object.keys(TYPES);
+const accent = t => `hsl(${TYPES[t].hue} 80% 62%)`;
+
+/* ================= state ================= */
+function newBlock(type, palette) {
+  const p = {};
+  for (const d of TYPES[type].params) p[d.k] = d.t === 'palette' ? (palette || PRESETS['Sunset']).slice() : d.def;
+  return { id: uid(), type, on: true, c: false, p };
+}
+const lastPalette = () => { for (let i = state.blocks.length - 1; i >= 0; i--) if (state.blocks[i].p.palette) return state.blocks[i].p.palette; };
+const DEFAULTS = () => {
+  const pal = PRESETS['Sunset'], bl = [newBlock('posterize', pal), newBlock('noise'), newBlock('pixelate'), newBlock('compress'), newBlock('dither', pal)];
+  return { maxDim: 1200, blocks: bl };
+};
+let state = DEFAULTS();
+function sanitize(s) { // rebuild state from saved data, tolerant of old/odd shapes
+  if (!s || !Array.isArray(s.blocks)) return null;
+  const blocks = [];
+  for (const b of s.blocks) {
+    if (!b || !TYPES[b.type]) continue;
+    const nb = newBlock(b.type); nb.on = b.on !== false; nb.c = !!b.c;
+    for (const d of TYPES[b.type].params) {
+      const v = b.p && b.p[d.k]; if (v === undefined) continue;
+      if (d.t === 'palette') { if (Array.isArray(v) && v.length >= 3 && v.length <= 16 && v.every(c => /^#[0-9a-f]{6}$/i.test(c))) nb.p[d.k] = v.slice(); }
+      else if (typeof v === typeof d.def) nb.p[d.k] = v;
+    }
+    blocks.push(nb);
+  }
+  return { maxDim: [600, 900, 1200, 1600, 2400].includes(s.maxDim) ? s.maxDim : 1200, blocks };
+}
+
+/* ================= persistence ================= */
+const dbp = (() => {
+  try { return new Promise((res, rej) => { const r = indexedDB.open('image-styler', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+  catch (e) { return Promise.reject(e); }
+})();
+dbp.catch(() => { $('#storeHint').textContent = 'Storage unavailable in this browser mode — changes will not be remembered.'; });
+const kv = (mode, fn) => dbp.then(db => new Promise((res, rej) => { const q = fn(db.transaction('kv', mode).objectStore('kv')); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }));
+const kvGet = k => kv('readonly', s => s.get(k)).catch(() => undefined);
+const kvSet = (k, v) => kv('readwrite', s => s.put(v, k)).catch(() => {});
+try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
+let saveTimer;
+const saveSettings = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => kvSet('stack', state), 300); };
+const touch = () => { saveSettings(); schedule(); };
+
+/* ================= source image ================= */
+let srcBitmap = null, srcName = 'image', src = null;
+async function loadBlob(blob, name, persist = true) {
+  let bmp; try { bmp = await createImageBitmap(blob); } catch (e) { alert('Could not read that image.'); return; }
+  srcBitmap = bmp; srcName = (name || 'image').replace(/\.[^.]+$/, '');
+  if (persist) kvSet('image', { blob, name: srcName });
+  buildSrc(); $('#drop').hidden = true; $('#canvasWrap').hidden = false; $('#btnDownload').disabled = false; schedule();
+}
+function buildSrc() {
+  if (!srcBitmap) return;
+  const sc = Math.min(1, state.maxDim / Math.max(srcBitmap.width, srcBitmap.height));
+  src = mk(Math.round(srcBitmap.width * sc), Math.round(srcBitmap.height * sc));
+  const c = src.getContext('2d'); c.imageSmoothingQuality = 'high'; c.drawImage(srcBitmap, 0, 0, src.width, src.height);
+}
+function makeSample() {
+  const c = mk(900, 600), g = c.getContext('2d'), sky = g.createLinearGradient(0, 0, 0, 600);
+  sky.addColorStop(0, '#1a1a4e'); sky.addColorStop(.5, '#d6457a'); sky.addColorStop(1, '#ffc27a'); g.fillStyle = sky; g.fillRect(0, 0, 900, 600);
+  const sun = g.createRadialGradient(450, 330, 10, 450, 330, 190);
+  sun.addColorStop(0, '#fffbe0'); sun.addColorStop(.4, '#ffd36e'); sun.addColorStop(1, 'rgba(255,150,80,0)');
+  g.fillStyle = sun; g.beginPath(); g.arc(450, 330, 190, 0, 7); g.fill();
+  g.fillStyle = '#1b1530'; g.beginPath(); g.moveTo(0, 600); g.lineTo(0, 440);
+  for (let x = 0; x <= 900; x += 30) g.lineTo(x, 430 - 60 * Math.abs(Math.sin(x / 140)) - 30 * Math.sin(x / 47));
+  g.lineTo(900, 600); g.fill(); g.fillStyle = '#0c0a18'; g.fillRect(0, 520, 900, 80);
+  return new Promise(r => c.toBlob(r, 'image/png'));
+}
+
+/* ================= render ================= */
 const out = $('#out'), origCv = $('#orig'), octx = out.getContext('2d');
 let token = 0, raf = 0;
 function schedule() { cancelAnimationFrame(raf); raf = requestAnimationFrame(render); }
 async function render() {
   if (!src) return;
-  const tok = ++token, W = src.width, H = src.height, pal = paletteRgb();
-  const work = mk(W, H), g = work.getContext('2d', { willReadFrequently: true });
-  g.drawImage(src, 0, 0);
-  if (state.posterize.on || state.noise.on) {
-    const id = g.getImageData(0, 0, W, H);
-    if (state.posterize.on) posterize(id.data, pal);
-    if (state.noise.on && state.noise.amount > 0) addNoise(id, state.noise);
-    g.putImageData(id, 0, 0);
+  const tok = ++token, W = src.width, H = src.height, work = mk(W, H);
+  work.getContext('2d', { willReadFrequently: true }).drawImage(src, 0, 0);
+  for (const b of state.blocks) {
+    if (!b.on) continue;
+    try { await TYPES[b.type].run(work, b.p); } catch (e) { console.error(b.type, e); }
+    if (tok !== token) return;
   }
-  if (state.pixel.on) { await pixelate(work, state.pixel); if (tok !== token) return; }
-  if (state.dither.on) dither(work, pal, state.dither);
-  if (tok !== token) return;
   out.width = W; out.height = H; octx.drawImage(work, 0, 0);
   origCv.width = W; origCv.height = H; origCv.getContext('2d').drawImage(src, 0, 0);
-  $('#info').textContent = `${W} × ${H}px`;
-  fitClass();
+  $('#info').textContent = `${W} × ${H}px`; fitClass();
 }
 function fitClass() { out.classList.toggle('pix', out.clientWidth > out.width); origCv.className = out.className; }
 window.addEventListener('resize', () => src && fitClass());
 
-/* ---------- UI binding ---------- */
-function syncUI() {
-  $$('[data-k]').forEach(el => {
-    const v = getPath(state, el.dataset.k);
-    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
-  });
-  $$('[data-o]').forEach(o => o.value = getPath(state, o.dataset.o));
-  $('#pcount').value = state.palette.length; $('#pcountOut').value = state.palette.length;
-  drawSwatches();
-  $('#presets').value = Object.keys(PRESETS).find(k => PRESETS[k].join() === state.palette.join()) || '';
+/* ================= sheet (bottom sheet / popover) ================= */
+const sheet = $('#sheet');
+let sheetClosed = null;
+function openSheet(title, body, { light = false, onClose } = {}) {
+  $('#sheetTitle').textContent = title; const sb = $('#sheetBody'); sb.innerHTML = ''; sb.append(body);
+  sheet.classList.toggle('light', light); sheet.hidden = false; sheetClosed = onClose || null;
 }
-function onChange(e) {
-  const el = e.target, k = el.dataset.k; if (!k) return;
-  let v = el.type === 'checkbox' ? el.checked : el.type === 'range' || k === 'maxDim' ? Number(el.value) : el.value;
-  setPath(state, k, v);
-  const o = $(`[data-o="${k}"]`); if (o) o.value = v;
-  if (k === 'maxDim') buildSrc();
-  saveSettings(); schedule();
-}
-document.addEventListener('input', onChange);
-document.addEventListener('change', onChange);
+function closeSheet() { if (sheet.hidden) return; sheet.hidden = true; const f = sheetClosed; sheetClosed = null; f && f(); }
+$('#sheetBg').addEventListener('click', closeSheet);
+$('#sheetClose').addEventListener('click', closeSheet);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
 
-function drawSwatches() {
-  const box = $('#swatches'); box.innerHTML = '';
-  state.palette.forEach((c, i) => {
-    const inp = document.createElement('input'); inp.type = 'color'; inp.value = c; inp.title = c;
-    inp.addEventListener('input', () => { state.palette[i] = inp.value; $('#presets').value = ''; saveSettings(); schedule(); });
-    box.appendChild(inp);
+/* ================= color picker ================= */
+function openColorPicker(hex, onChange, title) {
+  let [H, Sx, V] = rgbToHsv(...hexToRgb(hex));
+  const sv = h('div', { class: 'cp-sv' }, h('div', { class: 'cp-knob' }));
+  const hue = h('div', { class: 'cp-hue' }, h('div', { class: 'cp-knob' }));
+  const prev = h('div', { class: 'cp-prev' });
+  const hexIn = h('input', { class: 'cp-hex', maxlength: 7, spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Hex color' });
+  const quick = h('div', { class: 'cp-quick' });
+  const update = (emit = true, fromHex = false) => {
+    const c = hsvHex(H, Sx, V);
+    sv.style.setProperty('--h', Math.round(H)); sv.firstChild.style.cssText = `left:${Sx * 100}%;top:${(1 - V) * 100}%`;
+    hue.firstChild.style.left = H / 360 * 100 + '%'; prev.style.background = c; if (!fromHex) hexIn.value = c;
+    if (emit) onChange(c);
+  };
+  const drag = (el, fn) => {
+    const move = e => { const r = el.getBoundingClientRect(); fn(clamp((e.clientX - r.left) / r.width, 0, 1), clamp((e.clientY - r.top) / r.height, 0, 1)); update(); };
+    el.addEventListener('pointerdown', e => { e.preventDefault(); el.setPointerCapture(e.pointerId); move(e); el.onpointermove = move; });
+    const end = () => { el.onpointermove = null; };
+    el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+  };
+  drag(sv, (x, y) => { Sx = x; V = 1 - y; });
+  drag(hue, x => { H = x * 359.999; });
+  hexIn.addEventListener('input', () => {
+    let v = hexIn.value.trim(); if (v[0] !== '#') v = '#' + v;
+    if (/^#[0-9a-f]{6}$/i.test(v)) { [H, Sx, V] = rgbToHsv(...hexToRgb(v)); update(true, true); }
   });
+  // quick-pick: colors already used in the stack
+  const used = [...new Set(state.blocks.flatMap(b => b.p.palette || []))].slice(0, 16);
+  used.forEach(c => quick.append(h('button', { style: `background:${c}`, 'aria-label': c, onclick: () => { [H, Sx, V] = rgbToHsv(...hexToRgb(c)); update(); } })));
+  update(false);
+  openSheet(title || 'Pick a color', h('div', { class: 'cp' }, sv, hue, h('div', { class: 'cp-row' }, prev, hexIn), used.length ? quick : null), { light: true });
 }
-function setPalette(p) { state.palette = p.slice(0, 16); syncUI(); saveSettings(); schedule(); }
 
-$('#pcount').addEventListener('input', e => {
-  const n = Number(e.target.value), p = state.palette.slice(0, n), rnd = mulberry32(n * 7919 + p.length);
-  while (p.length < n) p.push(hslToHex(rnd() * 360, .6 + rnd() * .3, .3 + rnd() * .4));
-  setPalette(p);
-});
-const presetSel = $('#presets');
-presetSel.innerHTML = '<option value="" disabled>Presets…</option>' + Object.keys(PRESETS).map(k => `<option>${k}</option>`).join('');
-presetSel.addEventListener('change', () => PRESETS[presetSel.value] && setPalette(PRESETS[presetSel.value]));
-$('#btnRandom').addEventListener('click', () => {
-  const n = state.palette.length, rnd = mulberry32(Date.now() & 0xffff), h0 = rnd() * 360, p = [];
-  for (let i = 0; i < n; i++) p.push(hslToHex((h0 + i * (360 / n) * (.4 + rnd() * .6)) % 360, .5 + rnd() * .4, .1 + .8 * i / (n - 1)));
-  setPalette(p);
-});
-$('#btnExtract').addEventListener('click', () => {
-  if (!src) return;
-  const k = state.palette.length, g = src.getContext('2d'), d = g.getImageData(0, 0, src.width, src.height).data;
-  const step = Math.max(1, Math.floor(d.length / 4 / 20000)), pts = [];
+/* ================= block UI ================= */
+const fmt = (d, v) => v;
+function paletteEditor(b, k) {
+  const pal = b.p[k], wrap = h('div', { class: 'row', style: 'gap:10px' });
+  const cnt = h('input', { type: 'range', min: 3, max: 16, step: 1 }); cnt.value = pal.length;
+  const cntOut = h('output', {}, pal.length);
+  const box = h('div', { class: 'swatches' }), strip = h('div', { class: 'strip' }), pname = h('span');
+  const setPal = arr => { pal.splice(0, pal.length, ...arr.slice(0, 16)); cnt.value = pal.length; cntOut.textContent = pal.length; draw(); touch(); };
+  const draw = () => {
+    box.innerHTML = ''; strip.innerHTML = '';
+    pal.forEach((c, i) => {
+      const s = h('button', { class: 'swatch', style: `background:${c}`, 'aria-label': `Color ${i + 1}`, onclick: () => openColorPicker(pal[i], hx => { pal[i] = hx; s.style.background = hx; strip.children[i].style.background = hx; pname.textContent = ''; touch(); }, `Color ${i + 1} of ${pal.length}`) });
+      box.append(s); strip.append(h('i', { style: `background:${c}` }));
+    });
+    pname.textContent = presetName(pal) || 'Custom';
+  };
+  cnt.addEventListener('input', () => {
+    const n = Number(cnt.value), rnd = mulberry32(n * 7919 + pal.length), p = pal.slice(0, n);
+    while (p.length < n) p.push(hslHex(rnd() * 360, .6 + rnd() * .3, .3 + rnd() * .4));
+    setPal(p);
+  });
+  const presetBtn = h('button', { class: 'btn small presetbtn', onclick: () => {
+    const list = h('div', { class: 'plist' });
+    for (const [n, cols] of Object.entries(PRESETS)) list.append(h('button', { class: 'prow', onclick: () => { setPal(cols); closeSheet(); } }, h('b', {}, n), h('div', { class: 'strip' }, cols.map(c => h('i', { style: `background:${c}` })))));
+    openSheet('Palette presets', list);
+  } }, strip, pname);
+  const extract = h('button', { class: 'btn small', onclick: () => src && setPal(extractPalette(pal.length)) }, 'From image');
+  const rand = h('button', { class: 'btn small', onclick: () => {
+    const n = pal.length, rnd = mulberry32(Date.now() & 0xffff), h0 = rnd() * 360, p = [];
+    for (let i = 0; i < n; i++) p.push(hslHex((h0 + i * (360 / n) * (.4 + rnd() * .6)) % 360, .5 + rnd() * .4, .1 + .8 * i / (n - 1)));
+    setPal(p);
+  } }, 'Random');
+  draw();
+  wrap.append(h('div', { class: 'row' }, h('label', {}, 'Colors', cntOut), cnt), box, h('div', { class: 'row inline' }, presetBtn, extract, rand));
+  return wrap;
+}
+function extractPalette(k) {
+  const d = src.getContext('2d').getImageData(0, 0, src.width, src.height).data, step = Math.max(1, Math.floor(d.length / 4 / 20000)), pts = [];
   for (let i = 0; i < d.length / 4; i += step) pts.push([d[i * 4], d[i * 4 + 1], d[i * 4 + 2]]);
   const rnd = mulberry32(5), cen = [pts[(rnd() * pts.length) | 0]];
-  while (cen.length < k) { // k-means++ seeding
+  while (cen.length < k) {
     const ds = pts.map(p => Math.min(...cen.map(c => (p[0] - c[0]) ** 2 + (p[1] - c[1]) ** 2 + (p[2] - c[2]) ** 2)));
-    let r = rnd() * ds.reduce((a, b) => a + b, 0), j = 0; while (j < ds.length - 1 && (r -= ds[j]) > 0) j++;
-    cen.push(pts[j]);
+    let r = rnd() * ds.reduce((a, b) => a + b, 0), j = 0; while (j < ds.length - 1 && (r -= ds[j]) > 0) j++; cen.push(pts[j]);
   }
   for (let it = 0; it < 10; it++) {
     const sum = cen.map(() => [0, 0, 0, 0]);
@@ -316,37 +447,80 @@ $('#btnExtract').addEventListener('click', () => {
     sum.forEach((s, i) => { if (s[3]) cen[i] = [s[0] / s[3], s[1] / s[3], s[2] / s[3]]; });
   }
   cen.sort((a, b) => (a[0] * .3 + a[1] * .59 + a[2] * .11) - (b[0] * .3 + b[1] * .59 + b[2] * .11));
-  setPalette(cen.map(c => rgbToHex(...c)));
-});
-$('#btnReseed').addEventListener('click', () => { state.noise.seed = (Math.random() * 1e9) | 0; saveSettings(); schedule(); });
-$('#btnReset').addEventListener('click', () => { state = DEFAULTS(); buildSrc(); syncUI(); saveSettings(); schedule(); });
+  return cen.map(c => rgbToHex(...c));
+}
+function paramEl(b, d) {
+  if (d.t === 'range') {
+    const o = h('output', {}, b.p[d.k]), i = h('input', { type: 'range', min: d.min, max: d.max, step: d.step }); i.value = b.p[d.k];
+    i.addEventListener('input', () => { b.p[d.k] = Number(i.value); o.textContent = i.value; touch(); });
+    return h('div', { class: 'row' }, h('label', {}, d.label, o), i);
+  }
+  if (d.t === 'select') {
+    const s = h('select', {}, d.opts.map(([v, l]) => h('option', { value: v }, l))); s.value = b.p[d.k];
+    s.addEventListener('change', () => { b.p[d.k] = s.value; touch(); });
+    return h('div', { class: 'row' }, h('label', {}, d.label), s);
+  }
+  if (d.t === 'check') {
+    const i = h('input', { type: 'checkbox' }); i.checked = b.p[d.k];
+    i.addEventListener('change', () => { b.p[d.k] = i.checked; touch(); });
+    return h('label', { class: 'check' }, i, d.label);
+  }
+  if (d.t === 'seed') return h('button', { class: 'btn small', style: 'align-self:flex-start', onclick: () => { b.p.seed = (Math.random() * 1e9) | 0; touch(); } }, '🎲 Reroll');
+  if (d.t === 'palette') return paletteEditor(b, d.k);
+}
+function blockEl(b, i) {
+  const T = TYPES[b.type], n = state.blocks.length;
+  const tog = h('input', { type: 'checkbox', 'aria-label': 'Enable' }); tog.checked = b.on;
+  const card = h('section', { class: 'card' + (b.on ? '' : ' off') + (b.c ? ' collapsed' : ''), style: `--bc:${accent(b.type)}` });
+  tog.addEventListener('change', () => { b.on = tog.checked; card.classList.toggle('off', !b.on); touch(); });
+  const move = d => () => { const j = i + d; if (j < 0 || j >= n) return; [state.blocks[i], state.blocks[j]] = [state.blocks[j], state.blocks[i]]; renderBlocks(); touch(); };
+  const title = h('h2', { class: 'tap', onclick: () => { b.c = !b.c; card.classList.toggle('collapsed', b.c); saveSettings(); } }, h('span', { class: 'chev' }, '▾'), ` ${i + 1} · ${T.name}`);
+  card.append(h('header', {},
+    h('label', { class: 'sw-toggle' }, tog, h('span')), title,
+    h('button', { class: 'ib', title: 'Move up', 'aria-label': 'Move up', disabled: i === 0, onclick: move(-1) }, '▲'),
+    h('button', { class: 'ib', title: 'Move down', 'aria-label': 'Move down', disabled: i === n - 1, onclick: move(1) }, '▼'),
+    h('button', { class: 'ib', title: 'Duplicate', 'aria-label': 'Duplicate', onclick: () => { const c = JSON.parse(JSON.stringify(b)); c.id = uid(); state.blocks.splice(i + 1, 0, c); renderBlocks(); touch(); } }, '⧉'),
+    h('button', { class: 'ib', title: 'Remove', 'aria-label': 'Remove', onclick: () => { state.blocks.splice(i, 1); renderBlocks(); touch(); } }, '✕')));
+  card.append(h('div', { class: 'body' }, T.params.map(d => paramEl(b, d))));
+  return card;
+}
+function renderBlocks() {
+  const box = $('#blocks'); box.innerHTML = '';
+  if (!state.blocks.length) box.append(h('p', { class: 'empty' }, 'No modifiers — the original image is shown. Add one!'));
+  state.blocks.forEach((b, i) => box.appendChild(blockEl(b, i)));
+}
+function openAddMenu() {
+  const g = h('div', { class: 'tiles' });
+  for (const k of TYPE_KEYS) g.append(h('button', { class: 'tile', style: `--bc:${accent(k)}`, onclick: () => {
+    state.blocks.push(newBlock(k, lastPalette())); closeSheet(); renderBlocks(); touch();
+    const cards = $$('#blocks .card'); cards[cards.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } }, h('b', {}, TYPES[k].name), h('small', {}, TYPES[k].desc)));
+  openSheet('Add modifier', g);
+}
+$$('[data-add]').forEach(b => b.addEventListener('click', openAddMenu));
 
-/* compare (hold) */
-const cmp = $('#btnCompare');
-const showOrig = on => { origCv.hidden = !on; };
-['pointerdown'].forEach(ev => cmp.addEventListener(ev, e => { e.preventDefault(); showOrig(true); }));
+/* ================= output / looks / io ================= */
+$('#maxDim').addEventListener('change', e => { state.maxDim = Number(e.target.value); buildSrc(); touch(); });
+$('#btnReset').addEventListener('click', () => { if (!confirm('Reset the modifier stack to the default?')) return; state = DEFAULTS(); syncAll(); touch(); });
+function syncAll() { $('#maxDim').value = state.maxDim; renderBlocks(); buildSrc(); }
+
+const cmp = $('#btnCompare'), showOrig = on => { origCv.hidden = !on; };
+cmp.addEventListener('pointerdown', e => { e.preventDefault(); showOrig(true); });
 ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => cmp.addEventListener(ev, () => showOrig(false)));
+cmp.addEventListener('contextmenu', e => e.preventDefault());
 
-/* saved looks */
 let looks = [];
 function drawLooks() {
   const ul = $('#looks'); ul.innerHTML = '';
-  looks.forEach((l, i) => {
-    const li = document.createElement('li');
-    li.innerHTML = '<span></span><button class="btn small">Load</button><button class="btn small" aria-label="Delete">✕</button>';
-    $('span', li).textContent = l.name;
-    const [load, del] = $$('button', li);
-    load.onclick = () => { state = merge(DEFAULTS(), JSON.parse(JSON.stringify(l.settings))); buildSrc(); syncUI(); saveSettings(); schedule(); };
-    del.onclick = () => { looks.splice(i, 1); kvSet('looks', looks); drawLooks(); };
-    ul.appendChild(li);
-  });
+  looks.forEach((l, i) => ul.append(h('li', {}, h('span', {}, l.name),
+    h('button', { class: 'btn small', onclick: () => { const s = sanitize(l.settings); if (!s) return; state = s; syncAll(); touch(); } }, 'Load'),
+    h('button', { class: 'ib', 'aria-label': 'Delete', onclick: () => { looks.splice(i, 1); kvSet('looks', looks); drawLooks(); } }, '✕'))));
 }
 $('#btnSaveLook').addEventListener('click', () => {
   const name = prompt('Name this look:', `Look ${looks.length + 1}`); if (!name) return;
   looks.push({ name, settings: JSON.parse(JSON.stringify(state)) }); kvSet('looks', looks); drawLooks();
 });
 
-/* upload / drop / paste / download */
 const fileInput = $('#file');
 $('#btnOpen').addEventListener('click', () => fileInput.click());
 $('#drop').addEventListener('click', e => { if (e.target.id !== 'btnSample') fileInput.click(); });
@@ -357,20 +531,15 @@ const stage = $('#stage');
 ['dragleave', 'drop'].forEach(ev => stage.addEventListener(ev, e => { e.preventDefault(); $('#drop').classList.remove('over'); }));
 stage.addEventListener('drop', e => { const f = [...e.dataTransfer.files].find(f => f.type.startsWith('image/')); if (f) loadBlob(f, f.name); });
 document.addEventListener('paste', e => { const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/')); if (f) loadBlob(f, 'pasted'); });
-$('#btnDownload').addEventListener('click', () => {
-  out.toBlob(b => {
-    const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = `${srcName}-styled.png`;
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  }, 'image/png');
-});
+$('#btnDownload').addEventListener('click', () => out.toBlob(b => {
+  const a = h('a', { href: URL.createObjectURL(b), download: `${srcName}-styled.png` }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}, 'image/png'));
 
-/* ---------- boot: restore saved session ---------- */
+/* ================= boot ================= */
 (async () => {
-  const saved = await kvGet('settings');
-  if (saved) state = merge(DEFAULTS(), saved);
-  syncUI();
+  const saved = sanitize(await kvGet('stack')); if (saved) state = saved;
+  syncAll();
   looks = (await kvGet('looks')) || []; drawLooks();
-  const img = await kvGet('image');
-  if (img && img.blob) loadBlob(img.blob, img.name, false);
+  const img = await kvGet('image'); if (img && img.blob) loadBlob(img.blob, img.name, false);
 })();
 })();
