@@ -40,6 +40,7 @@ function h(tag, props = {}, ...kids) {
 const PRESETS = {
   'Sunset': ['#1b1035', '#5b2a86', '#c13584', '#ff5e6c', '#ff9a5a', '#ffe7a3'],
   'Red': ramp(355, 6, .9),
+  'Crimson Night': ['#000000', '#2a0a18', '#5a1a3a', '#8a2a4e', '#d02a2a', '#ff4030'],
   'Blood Moon': ['#0a0003', '#3b0012', '#7a0a1c', '#c4161c', '#ff4d3a', '#ffd9c9'],
   'Orange': ramp(25, 6, .95),
   'Gold': ['#1a1203', '#4a3408', '#8f6a14', '#d4a62a', '#f7d96b', '#fff6d6'],
@@ -191,6 +192,18 @@ const TYPES = {
     async run(cv, p) { const s = p.scale, t = s > 1 ? down(cv, s) : cv; for (let i = 0; i < p.passes; i++) await jpegPass(t, p.quality / 100); if (s > 1) up(t, cv, s); } },
   dither: { name: 'Dither', desc: 'Map to palette with patterns', hue: 270, params: [S('method', 'Style', [['cross', 'Cross-hatch'], ['bayer4', 'Bayer 4×4'], ['bayer8', 'Bayer 8×8'], ['floyd', 'Floyd–Steinberg'], ['atkinson', 'Atkinson']], 'cross'), R('strength', 'Strength', 0, 100, 1, 70), R('scale', 'Dither scale', 1, 8, 1, 2), PAL],
     run(cv, p) { const pal = palRgb(p), s = p.scale, t = s > 1 ? down(cv, s) : cv; px(t, id => ditherData(id, pal, p)); if (s > 1) up(t, cv, s); } },
+  gradient: { name: 'Gradient map', desc: 'Map brightness onto a color ramp (with dither)', hue: 345, params: [S('method', 'Dither', [['none', 'None (hard bands)'], ['bayer4', 'Bayer 4×4'], ['bayer8', 'Bayer 8×8'], ['cross', 'Cross-hatch']], 'bayer4'), R('strength', 'Dither strength', 0, 100, 1, 70), R('scale', 'Dither scale', 1, 8, 1, 2), C('sort', 'Sort colors dark → light', true), PAL],
+    run(cv, p) {
+      const lum = c => .299 * c[0] + .587 * c[1] + .114 * c[2], pal = palRgb(p); if (p.sort) pal.sort((a, b) => lum(a) - lum(b));
+      const n = pal.length, s = p.scale, t = s > 1 ? down(cv, s) : cv, str = p.strength / 100;
+      const m = p.method === 'bayer4' ? B4 : p.method === 'bayer8' ? B8 : p.method === 'cross' ? CROSS : null;
+      px(t, id => { const { width: w, height: hh, data: d } = id;
+        for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4; let pos = lum(d.subarray(i, i + 3)) / 255 * (n - 1);
+          if (m) pos += (m.v[(y % m.n) * m.n + (x % m.n)] - .5) * str;
+          const c = pal[clamp(Math.round(pos), 0, n - 1)]; d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2];
+        } });
+      if (s > 1) up(t, cv, s); } },
   adjust: { name: 'Color adjust', desc: 'Brightness, contrast, saturation, hue', hue: 55, params: [R('brightness', 'Brightness', -100, 100, 1, 0), R('contrast', 'Contrast', -100, 100, 1, 0), R('saturation', 'Saturation', -100, 100, 1, 0), R('hue', 'Hue shift', 0, 360, 1, 0)],
     run(cv, p) {
       const a = p.hue * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
@@ -274,6 +287,16 @@ const lastPalette = () => { for (let i = state.blocks.length - 1; i >= 0; i--) i
 const DEFAULTS = () => {
   const pal = PRESETS['Sunset'], bl = [newBlock('posterize', pal), newBlock('noise'), newBlock('pixelate'), newBlock('compress'), newBlock('dither', pal)];
   return { maxDim: 1200, blocks: bl };
+};
+
+/* ---- starter looks ---- */
+const mkb = (type, p = {}, pal) => { const b = newBlock(type, pal); Object.assign(b.p, p); return b; };
+const STARTERS = {
+  'Red Night': () => [mkb('adjust', { contrast: 28, brightness: 4 }), mkb('pixelate', { size: 3 }), mkb('noise', { amount: 14, size: 3 }), mkb('gradient', { method: 'bayer4', strength: 70, scale: 3 }, PRESETS['Crimson Night'])],
+  'Sunset Pixel': () => DEFAULTS().blocks,
+  'Game Boy': () => [mkb('adjust', { contrast: 20 }), mkb('pixelate', { size: 4 }), mkb('gradient', { method: 'bayer8', strength: 80, scale: 4 }, PRESETS['Game Boy'])],
+  'Glitch TV': () => [mkb('rgbshift', { amount: 10 }), mkb('glitch'), mkb('scanlines'), mkb('vignette')],
+  'Matrix': () => [mkb('adjust', { contrast: 30 }), mkb('pixelate', { size: 3 }), mkb('gradient', { method: 'cross', strength: 60, scale: 3 }, PRESETS['Matrix']), mkb('glow'), mkb('scanlines', { spacing: 3 })],
 };
 let state = DEFAULTS();
 function sanitize(s) { // rebuild state from saved data, tolerant of old/odd shapes
@@ -500,6 +523,8 @@ function openAddMenu() {
 $$('[data-add]').forEach(b => b.addEventListener('click', openAddMenu));
 
 /* ================= output / looks / io ================= */
+const stBox = $('#starters');
+for (const k of Object.keys(STARTERS)) stBox.append(h('button', { class: 'chip', onclick: () => { state.blocks = STARTERS[k](); renderBlocks(); touch(); } }, k));
 $('#maxDim').addEventListener('change', e => { state.maxDim = Number(e.target.value); buildSrc(); touch(); });
 $('#btnReset').addEventListener('click', () => { if (!confirm('Reset the modifier stack to the default?')) return; state = DEFAULTS(); syncAll(); touch(); });
 function syncAll() { $('#maxDim').value = state.maxDim; renderBlocks(); buildSrc(); }

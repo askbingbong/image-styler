@@ -133,3 +133,9 @@ select{background:var(--bg);color:var(--text);border:1px solid var(--line);borde
   .swatches{grid-template-columns:repeat(6,1fr)}
   .tiles{grid-template-columns:1fr}
 }
+
+.starters{display:flex;flex-direction:column;gap:6px}
+.starters span{color:var(--muted);font-size:12px}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
+.chip{flex:none;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:7px 14px;cursor:pointer;min-height:36px}
+.chip:hover{border-color:var(--accent)}
