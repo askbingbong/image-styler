@@ -286,18 +286,90 @@ function newBlock(type, palette) {
 const lastPalette = () => { for (let i = state.blocks.length - 1; i >= 0; i--) if (state.blocks[i].p.palette) return state.blocks[i].p.palette; };
 const DEFAULTS = () => {
   const pal = PRESETS['Sunset'], bl = [newBlock('posterize', pal), newBlock('noise'), newBlock('pixelate'), newBlock('compress'), newBlock('dither', pal)];
-  return { maxDim: 1200, blocks: bl };
+  return { maxDim: 1200, blocks: bl, mode: 'simple', preset: 'Sunset Pixel', mix: 100 };
 };
 
-/* ---- starter looks ---- */
+/* ---- looks (presets) ---- */
 const mkb = (type, p = {}, pal) => { const b = newBlock(type, pal); Object.assign(b.p, p); return b; };
-const STARTERS = {
-  'Red Night': () => [mkb('adjust', { contrast: 28, brightness: 4 }), mkb('pixelate', { size: 3 }), mkb('noise', { amount: 14, size: 3 }), mkb('gradient', { method: 'bayer4', strength: 70, scale: 3 }, PRESETS['Crimson Night'])],
-  'Sunset Pixel': () => DEFAULTS().blocks,
-  'Game Boy': () => [mkb('adjust', { contrast: 20 }), mkb('pixelate', { size: 4 }), mkb('gradient', { method: 'bayer8', strength: 80, scale: 4 }, PRESETS['Game Boy'])],
-  'Glitch TV': () => [mkb('rgbshift', { amount: 10 }), mkb('glitch'), mkb('scanlines'), mkb('vignette')],
-  'Matrix': () => [mkb('adjust', { contrast: 30 }), mkb('pixelate', { size: 3 }), mkb('gradient', { method: 'cross', strength: 60, scale: 3 }, PRESETS['Matrix']), mkb('glow'), mkb('scanlines', { spacing: 3 })],
-};
+const grad = (stops, n = 16) => { const rgb = stops.map(hexToRgb); return Array.from({ length: n }, (_, i) => { const t = i / (n - 1) * (rgb.length - 1), a = Math.floor(t), b = Math.min(rgb.length - 1, a + 1), f = t - a; return rgbToHex(...rgb[a].map((v, k) => v + (rgb[b][k] - v) * f)); }); };
+const LOOKS = [];
+// knobs: [path, label]; path 'type.param' (first block of that type); 'a.x|b.y' links several params
+const L = (name, spec, knobs = []) => LOOKS.push({ name, knobs, build: () => spec.map(([t, p, pal]) => mkb(t, p, pal)) });
+const PX = ['pixelate.size|gradient.scale', 'Pixel size'];
+L('Matrix', [['adjust', { contrast: 30 }], ['pixelate', { size: 3 }], ['gradient', { method: 'cross', strength: 60, scale: 3 }, PRESETS['Matrix']], ['glow', {}], ['scanlines', { spacing: 3 }]],
+  [PX, ['glow.strength', 'Glow'], ['scanlines.darkness', 'Scanlines'], ['adjust.brightness', 'Brightness']]);
+L('Red Night', [['adjust', { contrast: 28, brightness: 4 }], ['pixelate', { size: 3 }], ['noise', { amount: 14, size: 3 }], ['gradient', { method: 'bayer4', strength: 70, scale: 3 }, PRESETS['Crimson Night']]],
+  [['pixelate.size|noise.size|gradient.scale', 'Pixel size'], ['adjust.brightness', 'Brightness'], ['noise.amount', 'Grain'], ['gradient.strength', 'Dither']]);
+L('Sunset Pixel', [['posterize', {}, PRESETS['Sunset']], ['noise', { amount: 30 }], ['pixelate', { size: 4 }], ['compress', {}], ['dither', {}, PRESETS['Sunset']]],
+  [['pixelate.size|compress.scale', 'Pixel size'], ['noise.amount', 'Noise'], ['compress.quality', 'Compression quality'], ['dither.strength', 'Dither']]);
+L('Game Boy', [['adjust', { contrast: 20 }], ['pixelate', { size: 4 }], ['gradient', { method: 'bayer8', strength: 80, scale: 4 }, PRESETS['Game Boy']]],
+  [['pixelate.size|gradient.scale', 'Pixel size'], ['adjust.contrast', 'Contrast'], ['adjust.brightness', 'Brightness'], ['gradient.strength', 'Dither']]);
+L('Glitch TV', [['rgbshift', { amount: 10 }], ['glitch', {}], ['scanlines', {}], ['vignette', {}]],
+  [['rgbshift.amount', 'RGB split'], ['glitch.intensity', 'Glitch'], ['glitch.slices', 'Glitch slices'], ['scanlines.darkness', 'Scanlines']]);
+L('VHS', [['adjust', { saturation: -15, contrast: -10, brightness: 6 }], ['blur', { radius: 1 }], ['rgbshift', { amount: 5, angle: 0 }], ['noise', { amount: 24, size: 2 }], ['glitch', { slices: 5, intensity: 15 }], ['scanlines', { spacing: 3, darkness: 30 }], ['vignette', { strength: 45 }]],
+  [['rgbshift.amount', 'Color bleed'], ['noise.amount', 'Tape noise'], ['glitch.intensity', 'Tracking glitch'], ['scanlines.darkness', 'Scanlines']]);
+L('Amber Terminal', [['adjust', { contrast: 25 }], ['pixelate', { size: 2 }], ['gradient', { method: 'cross', strength: 60, scale: 2 }, ['#000000', '#2b1600', '#7a4300', '#ffb000', '#ffe9a8']], ['glow', { threshold: 130, radius: 10, strength: 90 }], ['scanlines', { spacing: 3, darkness: 40 }]],
+  [PX, ['glow.strength', 'Glow'], ['scanlines.darkness', 'Scanlines'], ['adjust.brightness', 'Brightness']].map(k => k));
+L('Newspaper', [['adjust', { saturation: -100, contrast: 35 }], ['halftone', { cell: 7, color: false, invert: true }], ['noise', { amount: 10 }]],
+  [['halftone.cell', 'Dot size'], ['adjust.contrast', 'Contrast'], ['adjust.brightness', 'Brightness'], ['noise.amount', 'Paper grain']]);
+L('Pop Art', [['adjust', { saturation: 40, contrast: 30 }], ['posterize', {}, ['#111111', '#e63946', '#f4c430', '#1d6fd6', '#f8f4e3']], ['edges', { mode: 'overlay', strength: 85 }]],
+  [['adjust.contrast', 'Contrast'], ['adjust.brightness', 'Brightness'], ['edges.strength', 'Outlines']]);
+L('Color Halftone', [['adjust', { saturation: 50, contrast: 25 }], ['halftone', { cell: 9, color: true, invert: false }]],
+  [['halftone.cell', 'Dot size'], ['halftone.invert', 'Dark dots on paper'], ['adjust.saturation', 'Saturation'], ['adjust.contrast', 'Contrast']]);
+L('Thermal Cam', [['blur', { radius: 2 }], ['gradient', { method: 'none' }, ['#00004d', '#4b0082', '#b3123e', '#ff6a00', '#ffe100', '#ffffff']], ['noise', { amount: 10, size: 2 }]],
+  [['blur.radius', 'Smoothing'], ['noise.amount', 'Sensor noise']]);
+L('Vaporwave', [['adjust', { saturation: 20, contrast: 15 }], ['pixelate', { size: 2 }], ['gradient', { method: 'bayer8', strength: 70, scale: 2 }, PRESETS['Vaporwave']], ['rgbshift', { amount: 6, angle: 0 }], ['scanlines', { spacing: 4, darkness: 25 }]],
+  [PX, ['rgbshift.amount', 'RGB split'], ['scanlines.darkness', 'Scanlines'], ['adjust.brightness', 'Brightness']]);
+L('Cyberpunk', [['adjust', { contrast: 25, saturation: 30 }], ['gradient', { method: 'bayer4', strength: 50, scale: 2 }, PRESETS['Neon']], ['glow', { threshold: 140, radius: 14, strength: 120 }], ['rgbshift', { amount: 7, angle: 20 }]],
+  [['glow.strength', 'Glow'], ['rgbshift.amount', 'RGB split'], ['gradient.strength', 'Dither'], ['adjust.brightness', 'Brightness']]);
+L('Blueprint', [['blur', { radius: 1 }], ['edges', { mode: 'only', strength: 100 }], ['gradient', { method: 'none' }, ['#0a2a66', '#2c6bd6', '#eaf2ff']], ['noise', { amount: 8, size: 2 }]],
+  [['edges.strength', 'Line strength'], ['blur.radius', 'Simplify'], ['noise.amount', 'Paper grain']]);
+L('Pencil Sketch', [['blur', { radius: 1 }], ['edges', { mode: 'only', strength: 100 }], ['invert', {}], ['gradient', { method: 'none' }, ['#1c1c20', '#b9b5aa', '#f5f1e6']], ['noise', { amount: 10, size: 2 }]],
+  [['edges.strength', 'Line strength'], ['blur.radius', 'Simplify'], ['noise.amount', 'Paper grain']]);
+L('Noir Film', [['adjust', { saturation: -100, contrast: 35 }], ['noise', { amount: 28 }], ['vignette', { strength: 80, size: 30 }]],
+  [['adjust.contrast', 'Contrast'], ['adjust.brightness', 'Brightness'], ['noise.amount', 'Film grain'], ['vignette.strength', 'Vignette']]);
+L('Sepia Photo', [['adjust', { saturation: -100, contrast: 10 }], ['gradient', { method: 'none' }, grad(['#1b1008', '#85603a', '#fff3d6'])], ['noise', { amount: 12 }], ['vignette', { strength: 50, size: 35 }]],
+  [['adjust.contrast', 'Contrast'], ['adjust.brightness', 'Brightness'], ['noise.amount', 'Grain'], ['vignette.strength', 'Vignette']]);
+L('Deep Fried', [['adjust', { saturation: 90, contrast: 55 }], ['noise', { amount: 25, mono: false }], ['compress', { quality: 6, passes: 4, scale: 1 }], ['glow', { threshold: 170, radius: 6, strength: 70 }]],
+  [['compress.quality', 'Crunch (lower = worse)'], ['compress.passes', 'Fry passes'], ['noise.amount', 'Noise'], ['glow.strength', 'Glow']]);
+L('Dreamy', [['blur', { radius: 3 }], ['glow', { threshold: 100, radius: 25, strength: 110 }], ['adjust', { brightness: 8, saturation: 15, contrast: -5 }]],
+  [['blur.radius', 'Softness'], ['glow.strength', 'Glow'], ['glow.radius', 'Glow size'], ['adjust.saturation', 'Saturation']]);
+L('1-bit', [['adjust', { contrast: 15 }], ['pixelate', { size: 2 }], ['gradient', { method: 'bayer8', strength: 100, scale: 2 }, ['#000000', '#ffffff']]],
+  [PX, ['gradient.method', 'Pattern'], ['adjust.brightness', 'Brightness'], ['adjust.contrast', 'Contrast']]);
+L('Retro Poster', [['adjust', { contrast: 30, saturation: 30 }], ['posterize', {}, ['#1d1a2f', '#c8412b', '#f2b134', '#f5ecd5']], ['noise', { amount: 10, size: 2 }], ['vignette', { strength: 40, size: 40 }]],
+  [['adjust.contrast', 'Contrast'], ['adjust.saturation', 'Saturation'], ['noise.amount', 'Grain'], ['vignette.strength', 'Vignette']]);
+L('NES 8-bit', [['adjust', { contrast: 15, saturation: 20 }], ['pixelate', { size: 6 }], ['dither', { method: 'bayer4', strength: 35, scale: 6 }, ['#000000', '#fcfcfc', '#bcbcbc', '#7c7c7c', '#a80020', '#e45c10', '#f8b800', '#00a800', '#005800', '#00a8a8', '#0058f8', '#6844fc', '#d800cc', '#f878f8', '#503000', '#fcd8a8']]],
+  [['pixelate.size|dither.scale', 'Pixel size'], ['dither.strength', 'Dither'], ['adjust.saturation', 'Saturation'], ['adjust.contrast', 'Contrast']]);
+L('CGA 4-color', [['adjust', { contrast: 20, saturation: 40 }], ['pixelate', { size: 3 }], ['dither', { method: 'bayer4', strength: 100, scale: 3 }, PRESETS['CGA']]],
+  [['pixelate.size|dither.scale', 'Pixel size'], ['dither.method', 'Pattern'], ['dither.strength', 'Dither'], ['adjust.saturation', 'Saturation']]);
+L('Infrared', [['adjust', { contrast: 20 }], ['gradient', { method: 'bayer4', strength: 40, scale: 1 }, ['#1a0010', '#7a0050', '#ff3c8e', '#ffd0e0', '#ffffff']], ['glow', { threshold: 200, radius: 8, strength: 60 }]],
+  [['adjust.contrast', 'Contrast'], ['adjust.brightness', 'Brightness'], ['glow.strength', 'Glow']]);
+L('X-Ray', [['adjust', { saturation: -100, contrast: 10 }], ['invert', {}], ['gradient', { method: 'none' }, grad(['#000814', '#1a6fb5', '#eaffff'], 12)], ['glow', { threshold: 150, radius: 10, strength: 60 }], ['noise', { amount: 10 }]],
+  [['adjust.contrast', 'Contrast'], ['adjust.brightness', 'Brightness'], ['glow.strength', 'Glow'], ['noise.amount', 'Noise']]);
+L('Photocopy', [['adjust', { saturation: -100, contrast: 60, brightness: 10 }], ['noise', { amount: 40 }], ['gradient', { method: 'none' }, ['#111111', '#f2f2f0']]],
+  [['adjust.brightness', 'Threshold'], ['adjust.contrast', 'Contrast'], ['noise.amount', 'Toner noise']]);
+L('Risograph', [['adjust', { contrast: 20 }], ['noise', { amount: 20, size: 2 }], ['gradient', { method: 'bayer4', strength: 50, scale: 2 }, ['#10163a', '#3a46c9', '#ff4f8b', '#fff1dd']]],
+  [['noise.amount', 'Grain'], ['gradient.strength', 'Dither'], ['gradient.scale', 'Dither size'], ['adjust.contrast', 'Contrast']]);
+L('Ocean Dither', [['adjust', { contrast: 10 }], ['pixelate', { size: 3 }], ['gradient', { method: 'bayer8', strength: 85, scale: 3 }, PRESETS['Ice Blue']]],
+  [PX, ['gradient.strength', 'Dither'], ['adjust.brightness', 'Brightness'], ['adjust.contrast', 'Contrast']]);
+L('Golden Hour', [['adjust', { contrast: 15, brightness: 4 }], ['gradient', { method: 'none' }, grad(['#1a1203', '#8f6a14', '#f7d96b', '#fff6d6'])], ['glow', { threshold: 170, radius: 16, strength: 60 }], ['vignette', { strength: 40, size: 40 }]],
+  [['adjust.brightness', 'Brightness'], ['adjust.contrast', 'Contrast'], ['glow.strength', 'Glow'], ['vignette.strength', 'Vignette']]);
+L('Teal & Orange', [['adjust', { contrast: 20 }], ['gradient', { method: 'none' }, grad(['#04222c', '#1f8a8a', '#ffd9a0', '#ff7a2f'])], ['noise', { amount: 6 }], ['vignette', { strength: 30 }]],
+  [['adjust.brightness', 'Brightness'], ['adjust.contrast', 'Contrast'], ['noise.amount', 'Grain'], ['vignette.strength', 'Vignette']]);
+L('Duotone Pink', [['adjust', { contrast: 20 }], ['gradient', { method: 'bayer8', strength: 40, scale: 2 }, ['#1b0a3c', '#ff5ea8', '#ffe9f2']]],
+  [['adjust.brightness', 'Brightness'], ['adjust.contrast', 'Contrast'], ['gradient.strength', 'Dither'], ['gradient.method', 'Pattern']]);
+L('Glitch Art', [['pixelate', { size: 2 }], ['glitch', { slices: 30, intensity: 70 }], ['rgbshift', { amount: 12, angle: 15 }], ['adjust', { saturation: 50, contrast: 20 }], ['scanlines', { spacing: 4, darkness: 30 }]],
+  [['glitch.intensity', 'Glitch'], ['glitch.slices', 'Slices'], ['rgbshift.amount', 'RGB split'], ['pixelate.size', 'Pixel size']]);
+L('Trippy Waves', [['adjust', { saturation: 60, contrast: 10 }], ['wave', { amplitude: 16, length: 100, dir: 'h' }], ['wave', { amplitude: 10, length: 140, dir: 'v' }], ['rgbshift', { amount: 5, angle: 0 }], ['glow', { threshold: 150, radius: 14, strength: 70 }]],
+  [['wave.amplitude', 'Wobble'], ['wave.length', 'Wave size'], ['rgbshift.amount', 'RGB split'], ['glow.strength', 'Glow']]);
+// size-like params that must shrink with the image when rendering small thumbnails
+const SZ = { noise: ['size'], pixelate: ['size'], compress: ['scale'], dither: ['scale'], gradient: ['scale'], blur: ['radius'], glow: ['radius'], rgbshift: ['amount'], wave: ['amplitude', 'length'], scanlines: ['spacing'], halftone: ['cell'] };
+function scaleP(type, p, f) { if (f === 1 || !SZ[type]) return p; const q = { ...p }; for (const k of SZ[type]) q[k] = Math.max(1, Math.round(p[k] * f)); return q; }
+async function runChain(blocks, base, f = 1) {
+  const cv = copyOf(base);
+  for (const b of blocks) if (b.on) { try { await TYPES[b.type].run(cv, scaleP(b.type, b.p, f)); } catch (e) { console.error(b.type, e); } }
+  return cv;
+}
 let state = DEFAULTS();
 function sanitize(s) { // rebuild state from saved data, tolerant of old/odd shapes
   if (!s || !Array.isArray(s.blocks)) return null;
@@ -307,12 +379,14 @@ function sanitize(s) { // rebuild state from saved data, tolerant of old/odd sha
     const nb = newBlock(b.type); nb.on = b.on !== false; nb.c = !!b.c;
     for (const d of TYPES[b.type].params) {
       const v = b.p && b.p[d.k]; if (v === undefined) continue;
-      if (d.t === 'palette') { if (Array.isArray(v) && v.length >= 3 && v.length <= 16 && v.every(c => /^#[0-9a-f]{6}$/i.test(c))) nb.p[d.k] = v.slice(); }
+      if (d.t === 'palette') { if (Array.isArray(v) && v.length >= 2 && v.length <= 16 && v.every(c => /^#[0-9a-f]{6}$/i.test(c))) nb.p[d.k] = v.slice(); }
       else if (typeof v === typeof d.def) nb.p[d.k] = v;
     }
     blocks.push(nb);
   }
-  return { maxDim: [600, 900, 1200, 1600, 2400].includes(s.maxDim) ? s.maxDim : 1200, blocks };
+  return { maxDim: [600, 900, 1200, 1600, 2400].includes(s.maxDim) ? s.maxDim : 1200, blocks,
+    mode: s.mode === 'simple' ? 'simple' : 'advanced', preset: LOOKS.some(l => l.name === s.preset) ? s.preset : null,
+    mix: typeof s.mix === 'number' ? clamp(s.mix, 0, 100) : 100 };
 }
 
 /* ================= persistence ================= */
@@ -327,7 +401,7 @@ const kvSet = (k, v) => kv('readwrite', s => s.put(v, k)).catch(() => {});
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
 let saveTimer;
 const saveSettings = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => kvSet('stack', state), 300); };
-const touch = () => { saveSettings(); schedule(); };
+const touch = () => { if (state.mode === 'advanced' && state.preset) { state.preset = null; markSelected(); } saveSettings(); schedule(); };
 
 /* ================= source image ================= */
 let srcBitmap = null, srcName = 'image', src = null;
@@ -335,10 +409,12 @@ async function loadBlob(blob, name, persist = true) {
   let bmp; try { bmp = await createImageBitmap(blob); } catch (e) { alert('Could not read that image.'); return; }
   srcBitmap = bmp; srcName = (name || 'image').replace(/\.[^.]+$/, '');
   if (persist) kvSet('image', { blob, name: srcName });
-  buildSrc(); $('#drop').hidden = true; $('#canvasWrap').hidden = false; $('#btnDownload').disabled = false; schedule();
+  buildSrc(); $('#drop').hidden = true; $('#canvasWrap').hidden = false; $('#btnDownload').disabled = false; schedule(); if (state.mode === 'simple') buildThumbs();
 }
+let srcVer = 0, cache = [];
 function buildSrc() {
   if (!srcBitmap) return;
+  srcVer++; cache = [];
   const sc = Math.min(1, state.maxDim / Math.max(srcBitmap.width, srcBitmap.height));
   src = mk(Math.round(srcBitmap.width * sc), Math.round(srcBitmap.height * sc));
   const c = src.getContext('2d'); c.imageSmoothingQuality = 'high'; c.drawImage(srcBitmap, 0, 0, src.width, src.height);
@@ -361,14 +437,21 @@ let token = 0, raf = 0;
 function schedule() { cancelAnimationFrame(raf); raf = requestAnimationFrame(render); }
 async function render() {
   if (!src) return;
-  const tok = ++token, W = src.width, H = src.height, work = mk(W, H);
-  work.getContext('2d', { willReadFrequently: true }).drawImage(src, 0, 0);
-  for (const b of state.blocks) {
-    if (!b.on) continue;
-    try { await TYPES[b.type].run(work, b.p); } catch (e) { console.error(b.type, e); }
+  const tok = ++token, W = src.width, H = src.height, steps = state.blocks.filter(b => b.on), keys = [];
+  let acc = 'v' + srcVer; for (const b of steps) { acc += '|' + b.type + JSON.stringify(b.p); keys.push(acc); }
+  // reuse cached results for the unchanged leading modifiers; only re-run from the first changed one
+  let i = 0; while (i < steps.length && cache[i] && cache[i].key === keys[i]) i++;
+  let prev = i ? cache[i - 1].cv : src;
+  for (; i < steps.length; i++) {
+    const cv = copyOf(prev);
+    try { await TYPES[steps[i].type].run(cv, steps[i].p); } catch (e) { console.error(steps[i].type, e); }
     if (tok !== token) return;
+    cache[i] = { key: keys[i], cv }; prev = cv;
   }
-  out.width = W; out.height = H; octx.drawImage(work, 0, 0);
+  cache.length = steps.length;
+  out.width = W; out.height = H;
+  if (state.mix < 100) { octx.drawImage(src, 0, 0); octx.globalAlpha = state.mix / 100; }
+  octx.drawImage(prev, 0, 0); octx.globalAlpha = 1;
   origCv.width = W; origCv.height = H; origCv.getContext('2d').drawImage(src, 0, 0);
   $('#info').textContent = `${W} × ${H}px`; fitClass();
 }
@@ -422,16 +505,17 @@ function openColorPicker(hex, onChange, title) {
 
 /* ================= block UI ================= */
 const fmt = (d, v) => v;
-function paletteEditor(b, k) {
+function paletteEditor(b, k, opts = {}) {
+  const after = () => { opts.sync && opts.sync(pal); touch(); };
   const pal = b.p[k], wrap = h('div', { class: 'row', style: 'gap:10px' });
-  const cnt = h('input', { type: 'range', min: 3, max: 16, step: 1 }); cnt.value = pal.length;
+  const cnt = h('input', { type: 'range', min: 2, max: 16, step: 1 }); cnt.value = pal.length;
   const cntOut = h('output', {}, pal.length);
   const box = h('div', { class: 'swatches' }), strip = h('div', { class: 'strip' }), pname = h('span');
-  const setPal = arr => { pal.splice(0, pal.length, ...arr.slice(0, 16)); cnt.value = pal.length; cntOut.textContent = pal.length; draw(); touch(); };
+  const setPal = arr => { pal.splice(0, pal.length, ...arr.slice(0, 16)); cnt.value = pal.length; cntOut.textContent = pal.length; draw(); after(); };
   const draw = () => {
     box.innerHTML = ''; strip.innerHTML = '';
     pal.forEach((c, i) => {
-      const s = h('button', { class: 'swatch', style: `background:${c}`, 'aria-label': `Color ${i + 1}`, onclick: () => openColorPicker(pal[i], hx => { pal[i] = hx; s.style.background = hx; strip.children[i].style.background = hx; pname.textContent = ''; touch(); }, `Color ${i + 1} of ${pal.length}`) });
+      const s = h('button', { class: 'swatch', style: `background:${c}`, 'aria-label': `Color ${i + 1}`, onclick: () => openColorPicker(pal[i], hx => { pal[i] = hx; s.style.background = hx; strip.children[i].style.background = hx; pname.textContent = ''; after(); }, `Color ${i + 1} of ${pal.length}`) });
       box.append(s); strip.append(h('i', { style: `background:${c}` }));
     });
     pname.textContent = presetName(pal) || 'Custom';
@@ -524,10 +608,68 @@ $$('[data-add]').forEach(b => b.addEventListener('click', openAddMenu));
 
 /* ================= output / looks / io ================= */
 const stBox = $('#starters');
-for (const k of Object.keys(STARTERS)) stBox.append(h('button', { class: 'chip', onclick: () => { state.blocks = STARTERS[k](); renderBlocks(); touch(); } }, k));
+for (const l of LOOKS) stBox.append(h('button', { class: 'chip', onclick: () => applyLook(l.name) }, l.name));
+
+/* ---- simple mode ---- */
+const cards = {};
+for (const l of LOOKS) {
+  const pal = l.build().map(b => b.p.palette).filter(Boolean).pop() || ['#222222', '#888888', '#dddddd'];
+  const th = h('div', { class: 'thumb', style: `background:linear-gradient(90deg,${pal.map((c, i) => `${c} ${i / pal.length * 100}% ${(i + 1) / pal.length * 100}%`).join(',')})` });
+  const card = h('button', { class: 'look-card', onclick: () => applyLook(l.name) }, th, h('span', {}, l.name));
+  cards[l.name] = { card, th }; $('#lookGrid').append(card);
+}
+function markSelected() { for (const [n, c] of Object.entries(cards)) c.card.classList.toggle('sel', n === state.preset); }
+function applyLook(name) {
+  const l = LOOKS.find(x => x.name === name); if (!l) return;
+  state.blocks = l.build(); state.preset = name; renderBlocks(); renderSimple(); markSelected(); saveSettings(); schedule();
+}
+function mixRow() {
+  const o = h('output', {}, state.mix), i = h('input', { type: 'range', min: 0, max: 100, step: 1 }); i.value = state.mix;
+  i.addEventListener('input', () => { state.mix = Number(i.value); o.textContent = i.value; saveSettings(); schedule(); });
+  return h('div', { class: 'row' }, h('label', {}, 'Overall strength', o), i);
+}
+function knobEl(paths, label) {
+  const targets = paths.split('|').map(p => { const [t, k] = p.split('.'); const b = state.blocks.find(x => x.type === t); const d = b && TYPES[t].params.find(q => q.k === k); return b && d ? { b, d } : null; }).filter(Boolean);
+  if (!targets.length) return null;
+  const [first, ...rest] = targets, row = paramEl(first.b, { ...first.d, label: label || first.d.label });
+  const ctl = row.matches('input,select') ? row : row.querySelector('input,select');
+  const link = () => rest.forEach(t => { t.b.p[t.d.k] = t.d.t === 'range' ? Math.min(first.b.p[first.d.k], t.d.max) : first.b.p[first.d.k]; });
+  ['input', 'change'].forEach(ev => ctl.addEventListener(ev, link));
+  return row;
+}
+function renderSimple() {
+  const box = $('#simpleAdjust'); box.innerHTML = '';
+  const l = LOOKS.find(x => x.name === state.preset), body = h('div', { class: 'body', style: 'padding-top:4px' });
+  box.append(h('section', { class: 'card', style: '--bc:var(--accent)' }, h('header', {}, h('h2', {}, l ? `${l.name} — tweak` : 'Custom stack')), body));
+  if (!l) body.append(h('p', { class: 'hint' }, 'This stack was built in Advanced mode. Pick a look above to start from a preset, or switch to Advanced to keep editing.'));
+  else for (const [path, label] of l.knobs) { const el = knobEl(path, label); el && body.append(el); }
+  const pb = state.blocks.find(b => b.p.palette);
+  if (pb) body.append(h('div', { class: 'row' }, h('label', {}, 'Colors'), paletteEditor(pb, 'palette', { sync: pal => state.blocks.forEach(x => { if (x !== pb && x.p.palette) x.p.palette = pal.slice(); }) })));
+  body.append(mixRow());
+}
+let thumbVer = -1;
+async function buildThumbs() {
+  if (!src || thumbVer === srcVer) return;
+  const ver = thumbVer = srcVer, sc = Math.min(1, 600 / Math.max(src.width, src.height));
+  const base = mk(Math.round(src.width * sc), Math.round(src.height * sc)), g = base.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(src, 0, 0, base.width, base.height);
+  for (const l of LOOKS) {
+    await new Promise(r => setTimeout(r, 30)); if (ver !== srcVer) return;
+    const cv = await runChain(l.build(), base, base.width / src.width); if (ver !== srcVer) return;
+    cards[l.name].th.replaceChildren(cv);
+  }
+}
+function applyMode() {
+  const simple = state.mode === 'simple';
+  $('#simple').hidden = !simple; $('#advanced').hidden = simple; $('#mixHost').hidden = simple;
+  $('#modeSimple').setAttribute('aria-pressed', simple); $('#modeAdv').setAttribute('aria-pressed', !simple);
+  if (simple) { renderSimple(); buildThumbs(); } markSelected();
+}
+const setMode = m => { state.mode = m; applyMode(); saveSettings(); };
+$('#modeSimple').addEventListener('click', () => setMode('simple'));
+$('#modeAdv').addEventListener('click', () => setMode('advanced'));
 $('#maxDim').addEventListener('change', e => { state.maxDim = Number(e.target.value); buildSrc(); touch(); });
-$('#btnReset').addEventListener('click', () => { if (!confirm('Reset the modifier stack to the default?')) return; state = DEFAULTS(); syncAll(); touch(); });
-function syncAll() { $('#maxDim').value = state.maxDim; renderBlocks(); buildSrc(); }
+$('#btnReset').addEventListener('click', () => { if (!confirm('Reset the modifier stack to the default?')) return; const m = state.mode; state = DEFAULTS(); state.mode = m; syncAll(); touch(); });
+function syncAll() { $('#maxDim').value = state.maxDim; renderBlocks(); $('#mixHost').replaceChildren(mixRow()); buildSrc(); applyMode(); }
 
 const cmp = $('#btnCompare'), showOrig = on => { origCv.hidden = !on; };
 cmp.addEventListener('pointerdown', e => { e.preventDefault(); showOrig(true); });
@@ -538,7 +680,7 @@ let looks = [];
 function drawLooks() {
   const ul = $('#looks'); ul.innerHTML = '';
   looks.forEach((l, i) => ul.append(h('li', {}, h('span', {}, l.name),
-    h('button', { class: 'btn small', onclick: () => { const s = sanitize(l.settings); if (!s) return; state = s; syncAll(); touch(); } }, 'Load'),
+    h('button', { class: 'btn small', onclick: () => { const s = sanitize(l.settings); if (!s) return; s.mode = state.mode; state = s; syncAll(); touch(); } }, 'Load'),
     h('button', { class: 'ib', 'aria-label': 'Delete', onclick: () => { looks.splice(i, 1); kvSet('looks', looks); drawLooks(); } }, '✕'))));
 }
 $('#btnSaveLook').addEventListener('click', () => {

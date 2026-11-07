@@ -39,17 +39,31 @@
   </section>
 
   <aside class="panel">
-    <div class="starters"><span>Starter looks</span><div id="starters" class="chips"></div></div>
-    <div class="stack-head">
-      <h1>Modifiers <small>run top → bottom</small></h1>
-      <button class="btn primary small" data-add>+ Add</button>
+    <div class="seg" role="group" aria-label="Edit mode">
+      <button id="modeSimple" class="seg-b" type="button">Simple</button>
+      <button id="modeAdv" class="seg-b" type="button">Advanced</button>
     </div>
-    <div id="blocks" class="blocks"></div>
-    <button class="add-big" data-add>+ Add modifier</button>
+
+    <div id="simple">
+      <div class="sec-title">Pick a look</div>
+      <div id="lookGrid" class="look-grid"></div>
+      <div id="simpleAdjust" class="blocks"></div>
+    </div>
+
+    <div id="advanced">
+      <div class="starters"><span>Starter looks</span><div id="starters" class="chips"></div></div>
+      <div class="stack-head">
+        <h1>Modifiers <small>run top → bottom</small></h1>
+        <button class="btn primary small" data-add>+ Add</button>
+      </div>
+      <div id="blocks" class="blocks"></div>
+      <button class="add-big" data-add>+ Add modifier</button>
+    </div>
 
     <section class="card out-card">
       <header><h2>Output &amp; saved looks</h2></header>
       <div class="body">
+        <div id="mixHost"></div>
         <div class="row"><label for="maxDim">Max size</label>
           <select id="maxDim">
             <option value="600">600 px</option>
