@@ -67,6 +67,7 @@ const presetName = pal => Object.keys(PRESETS).find(k => PRESETS[k].join() === p
 const R = (k, label, min, max, step, def) => ({ t: 'range', k, label, min, max, step, def });
 const S = (k, label, opts, def) => ({ t: 'select', k, label, opts, def });
 const C = (k, label, def) => ({ t: 'check', k, label, def });
+const COL = (k, label, def) => ({ t: 'color', k, label, def });
 const PAL = { t: 'palette', k: 'palette' };
 const SEED = { t: 'seed', k: 'seed', def: 1 };
 
@@ -273,6 +274,54 @@ const TYPES = {
         const e = Math.min(1, Math.hypot(gx, gy) / 200) * k, i = (y * w + x) * 4;
         if (p.mode === 'only') d[i] = d[i + 1] = d[i + 2] = e * 255; else { d[i] *= 1 - e; d[i + 1] *= 1 - e; d[i + 2] *= 1 - e; }
       } }); } },
+  sharpen: { name: 'Sharpen', desc: 'Crisp up fine detail', hue: 160, params: [R('amount', 'Amount', 0, 300, 1, 100), R('radius', 'Radius', 1, 10, 1, 2)],
+    run(cv, p) { px(cv, id => { const d = id.data, f = toF(d), b = boxBlurF(toF(d), id.width, id.height, p.radius), k = p.amount / 100;
+      for (let i = 0, j = 0; i < d.length; i += 4, j += 3) { d[i] = f[j] + (f[j] - b[j]) * k; d[i + 1] = f[j + 1] + (f[j + 1] - b[j + 1]) * k; d[i + 2] = f[j + 2] + (f[j + 2] - b[j + 2]) * k; } }); } },
+  emboss: { name: 'Emboss', desc: 'Raised relief lighting', hue: 25, params: [R('strength', 'Strength', 0, 300, 1, 100), R('angle', 'Light angle', 0, 360, 1, 135), S('mode', 'Mode', [['gray', 'Gray relief'], ['color', 'Keep color']], 'gray')],
+    run(cv, p) { px(cv, id => {
+      const { width: w, height: hh, data: d } = id, L = new Float32Array(w * hh), a = p.angle * Math.PI / 180, dx = Math.round(Math.cos(a) * 1.4), dy = Math.round(Math.sin(a) * 1.4), k = p.strength / 100;
+      for (let i = 0; i < L.length; i++) L[i] = .299 * d[i * 4] + .587 * d[i * 4 + 1] + .114 * d[i * 4 + 2];
+      for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
+        const df = (L[clamp(y + dy, 0, hh - 1) * w + clamp(x + dx, 0, w - 1)] - L[clamp(y - dy, 0, hh - 1) * w + clamp(x - dx, 0, w - 1)]) * k, i = (y * w + x) * 4;
+        if (p.mode === 'gray') d[i] = d[i + 1] = d[i + 2] = 128 + df; else { d[i] += df; d[i + 1] += df; d[i + 2] += df; }
+      } }); } },
+  mirror: { name: 'Mirror', desc: 'Mirror halves / kaleidoscope', hue: 285, params: [S('mode', 'Mode', [['lr', 'Left → right'], ['rl', 'Right → left'], ['tb', 'Top → bottom'], ['bt', 'Bottom → top'], ['quad', 'Four-way']], 'quad')],
+    run(cv, p) {
+      const g = cv.getContext('2d'), W = cv.width, H = cv.height, hw = W >> 1, hh = H >> 1;
+      const horiz = fromLeft => { const cp = copyOf(cv); g.save(); if (fromLeft) { g.translate(W, 0); g.scale(-1, 1); g.drawImage(cp, 0, 0, hw, H, 0, 0, hw, H); } else { g.translate(hw, 0); g.scale(-1, 1); g.drawImage(cp, W - hw, 0, hw, H, 0, 0, hw, H); } g.restore(); };
+      const vert = fromTop => { const cp = copyOf(cv); g.save(); if (fromTop) { g.translate(0, H); g.scale(1, -1); g.drawImage(cp, 0, 0, W, hh, 0, 0, W, hh); } else { g.translate(0, hh); g.scale(1, -1); g.drawImage(cp, 0, H - hh, W, hh, 0, 0, W, hh); } g.restore(); };
+      if (p.mode === 'lr') horiz(true); else if (p.mode === 'rl') horiz(false); else if (p.mode === 'tb') vert(true); else if (p.mode === 'bt') vert(false); else { horiz(true); vert(true); } } },
+  pixelsort: { name: 'Pixel sort', desc: 'Smeared streaks of sorted pixels', hue: 310, params: [R('low', 'From brightness', 0, 255, 1, 70), R('high', 'To brightness', 0, 255, 1, 230), S('dir', 'Direction', [['h', 'Horizontal'], ['v', 'Vertical']], 'h'), C('reverse', 'Brightest first', false)],
+    run(cv, p) { px(cv, id => {
+      const { width: w, height: hh, data: d } = id, Hz = p.dir === 'h', lines = Hz ? hh : w, len = Hz ? w : hh, lum = new Float32Array(len), buf = new Uint8ClampedArray(len * 3);
+      for (let l = 0; l < lines; l++) {
+        const at = k => (Hz ? l * w + k : k * w + l) * 4;
+        for (let k = 0; k < len; k++) { const i = at(k); buf[k * 3] = d[i]; buf[k * 3 + 1] = d[i + 1]; buf[k * 3 + 2] = d[i + 2]; lum[k] = .299 * d[i] + .587 * d[i + 1] + .114 * d[i + 2]; }
+        let k = 0;
+        while (k < len) {
+          if (lum[k] < p.low || lum[k] > p.high) { k++; continue; }
+          let e = k; while (e < len && lum[e] >= p.low && lum[e] <= p.high) e++;
+          const idx = Array.from({ length: e - k }, (_, t) => k + t).sort((a, b) => p.reverse ? lum[b] - lum[a] : lum[a] - lum[b]);
+          idx.forEach((s, t) => { const i = at(k + t); d[i] = buf[s * 3]; d[i + 1] = buf[s * 3 + 1]; d[i + 2] = buf[s * 3 + 2]; });
+          k = e;
+        }
+      } }); } },
+  bulge: { name: 'Lens warp', desc: 'Fisheye bulge / pinch', hue: 195, params: [R('amount', 'Amount (− pinch, + bulge)', -100, 100, 1, 60), R('radius', 'Radius', 10, 150, 1, 100)],
+    run(cv, p) { px(cv, id => {
+      const { width: w, height: hh, data: d } = id, o = new Uint8ClampedArray(d), cx = w / 2, cy = hh / 2, R0 = Math.min(w, hh) / 2 * p.radius / 100, e = p.amount >= 0 ? 1 + p.amount / 50 : 1 / (1 - p.amount / 50);
+      for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
+        const dx = x - cx, dy = y - cy, r = Math.hypot(dx, dy); if (r >= R0 || r === 0) continue;
+        const s = Math.pow(r / R0, e) * R0 / r, fx = clamp(cx + dx * s, 0, w - 1.001), fy = clamp(cy + dy * s, 0, hh - 1.001), x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0, i = (y * w + x) * 4;
+        for (let c = 0; c < 3; c++) {
+          const a = o[(y0 * w + x0) * 4 + c], b = o[(y0 * w + x0 + 1) * 4 + c], cc = o[((y0 + 1) * w + x0) * 4 + c], dd = o[((y0 + 1) * w + x0 + 1) * 4 + c];
+          d[i + c] = (a * (1 - tx) + b * tx) * (1 - ty) + (cc * (1 - tx) + dd * tx) * ty;
+        }
+      } }); } },
+  tint: { name: 'Tint', desc: 'Overlay a color with a blend mode', hue: 15, params: [COL('color', 'Color', '#ff7a2f'), S('mode', 'Blend', [['color', 'Color'], ['multiply', 'Multiply'], ['screen', 'Screen'], ['overlay', 'Overlay'], ['soft-light', 'Soft light'], ['hard-light', 'Hard light'], ['difference', 'Difference']], 'overlay'), R('amount', 'Amount', 0, 100, 1, 50)],
+    run(cv, p) { const g = cv.getContext('2d'); g.save(); g.globalCompositeOperation = p.mode; g.globalAlpha = p.amount / 100; g.fillStyle = p.color; g.fillRect(0, 0, cv.width, cv.height); g.restore(); } },
+  border: { name: 'Border', desc: 'Frame or polaroid edge', hue: 40, params: [R('size', 'Thickness', 1, 30, 1, 5), COL('color', 'Color', '#f6f1e7'), C('polaroid', 'Polaroid (thick bottom)', false)],
+    run(cv, p) { const g = cv.getContext('2d'), W = cv.width, H = cv.height, s = Math.round(Math.min(W, H) * p.size / 100), b = p.polaroid ? s * 3 : s;
+      g.fillStyle = p.color; g.fillRect(0, 0, W, s); g.fillRect(0, H - b, W, b); g.fillRect(0, 0, s, H); g.fillRect(W - s, 0, s, H); } },
 };
 const TYPE_KEYS = Object.keys(TYPES);
 const accent = t => `hsl(${TYPES[t].hue} 80% 62%)`;
@@ -286,7 +335,7 @@ function newBlock(type, palette) {
 const lastPalette = () => { for (let i = state.blocks.length - 1; i >= 0; i--) if (state.blocks[i].p.palette) return state.blocks[i].p.palette; };
 const DEFAULTS = () => {
   const pal = PRESETS['Sunset'], bl = [newBlock('posterize', pal), newBlock('noise'), newBlock('pixelate'), newBlock('compress'), newBlock('dither', pal)];
-  return { maxDim: 1200, blocks: bl, mode: 'simple', preset: 'Sunset Pixel', mix: 100 };
+  return { maxDim: 1200, blocks: bl, mode: 'simple', preset: 'Sunset Pixel', mix: 100, rot: 0, flip: false, fmt: 'png', q: 92 };
 };
 
 /* ---- looks (presets) ---- */
@@ -362,8 +411,24 @@ L('Glitch Art', [['pixelate', { size: 2 }], ['glitch', { slices: 30, intensity: 
   [['glitch.intensity', 'Glitch'], ['glitch.slices', 'Slices'], ['rgbshift.amount', 'RGB split'], ['pixelate.size', 'Pixel size']]);
 L('Trippy Waves', [['adjust', { saturation: 60, contrast: 10 }], ['wave', { amplitude: 16, length: 100, dir: 'h' }], ['wave', { amplitude: 10, length: 140, dir: 'v' }], ['rgbshift', { amount: 5, angle: 0 }], ['glow', { threshold: 150, radius: 14, strength: 70 }]],
   [['wave.amplitude', 'Wobble'], ['wave.length', 'Wave size'], ['rgbshift.amount', 'RGB split'], ['glow.strength', 'Glow']]);
+L('Pixel Sort', [['pixelsort', { low: 70, high: 230, dir: 'h' }], ['adjust', { saturation: 30, contrast: 10 }]],
+  [['pixelsort.low', 'Sort from'], ['pixelsort.high', 'Sort to'], ['pixelsort.dir', 'Direction'], ['pixelsort.reverse', 'Brightest first']]);
+L('Kaleidoscope', [['mirror', { mode: 'quad' }], ['adjust', { saturation: 50, contrast: 15 }], ['glow', { threshold: 150, radius: 12, strength: 60 }]],
+  [['mirror.mode', 'Mirror'], ['adjust.saturation', 'Saturation'], ['glow.strength', 'Glow']]);
+L('Mirror World', [['mirror', { mode: 'lr' }], ['adjust', { saturation: 25 }], ['vignette', { strength: 40, size: 40 }]],
+  [['mirror.mode', 'Mirror'], ['adjust.saturation', 'Saturation'], ['vignette.strength', 'Vignette']]);
+L('Embossed Metal', [['adjust', { saturation: -100, contrast: 10 }], ['emboss', { strength: 80, angle: 135, mode: 'gray' }], ['tint', { color: '#8fb4ff', mode: 'overlay', amount: 35 }]],
+  [['emboss.strength', 'Depth'], ['emboss.angle', 'Light angle'], ['tint.color', 'Metal tint'], ['tint.amount', 'Tint amount']]);
+L('Fisheye Cam', [['bulge', { amount: 60, radius: 100 }], ['rgbshift', { amount: 4, angle: 0 }], ['adjust', { saturation: 20, contrast: 10 }], ['vignette', { strength: 70, size: 30 }]],
+  [['bulge.amount', 'Lens'], ['rgbshift.amount', 'RGB split'], ['vignette.strength', 'Vignette']]);
+L('Polaroid', [['adjust', { contrast: -8, saturation: -10, brightness: 6 }], ['tint', { color: '#ffb86b', mode: 'soft-light', amount: 45 }], ['noise', { amount: 10 }], ['vignette', { strength: 35, size: 45 }], ['border', { size: 6, polaroid: true, color: '#f6f1e7' }]],
+  [['tint.color', 'Warmth tint'], ['tint.amount', 'Tint amount'], ['noise.amount', 'Grain'], ['border.size', 'Border'], ['border.color', 'Border color']]);
+L('Crisp HDR', [['sharpen', { amount: 150, radius: 2 }], ['adjust', { contrast: 20, saturation: 30 }]],
+  [['sharpen.amount', 'Sharpness'], ['adjust.contrast', 'Contrast'], ['adjust.saturation', 'Saturation'], ['adjust.brightness', 'Brightness']]);
+L('Neon Edges', [['blur', { radius: 1 }], ['edges', { mode: 'only', strength: 100 }], ['gradient', { method: 'none' }, grad(['#000000', '#3a1cff', '#ff2fa0', '#ffffff'], 8)], ['glow', { threshold: 60, radius: 10, strength: 150 }]],
+  [['edges.strength', 'Line strength'], ['blur.radius', 'Simplify'], ['glow.strength', 'Glow']]);
 // size-like params that must shrink with the image when rendering small thumbnails
-const SZ = { noise: ['size'], pixelate: ['size'], compress: ['scale'], dither: ['scale'], gradient: ['scale'], blur: ['radius'], glow: ['radius'], rgbshift: ['amount'], wave: ['amplitude', 'length'], scanlines: ['spacing'], halftone: ['cell'] };
+const SZ = { sharpen: ['radius'], noise: ['size'], pixelate: ['size'], compress: ['scale'], dither: ['scale'], gradient: ['scale'], blur: ['radius'], glow: ['radius'], rgbshift: ['amount'], wave: ['amplitude', 'length'], scanlines: ['spacing'], halftone: ['cell'] };
 function scaleP(type, p, f) { if (f === 1 || !SZ[type]) return p; const q = { ...p }; for (const k of SZ[type]) q[k] = Math.max(1, Math.round(p[k] * f)); return q; }
 async function runChain(blocks, base, f = 1) {
   const cv = copyOf(base);
@@ -380,13 +445,14 @@ function sanitize(s) { // rebuild state from saved data, tolerant of old/odd sha
     for (const d of TYPES[b.type].params) {
       const v = b.p && b.p[d.k]; if (v === undefined) continue;
       if (d.t === 'palette') { if (Array.isArray(v) && v.length >= 2 && v.length <= 16 && v.every(c => /^#[0-9a-f]{6}$/i.test(c))) nb.p[d.k] = v.slice(); }
-      else if (typeof v === typeof d.def) nb.p[d.k] = v;
+      else if (typeof v === typeof d.def && (d.t !== 'color' || /^#[0-9a-f]{6}$/i.test(v))) nb.p[d.k] = v;
     }
     blocks.push(nb);
   }
   return { maxDim: [600, 900, 1200, 1600, 2400].includes(s.maxDim) ? s.maxDim : 1200, blocks,
     mode: s.mode === 'simple' ? 'simple' : 'advanced', preset: LOOKS.some(l => l.name === s.preset) ? s.preset : null,
-    mix: typeof s.mix === 'number' ? clamp(s.mix, 0, 100) : 100 };
+    mix: typeof s.mix === 'number' ? clamp(s.mix, 0, 100) : 100,
+    rot: [0, 90, 180, 270].includes(s.rot) ? s.rot : 0, flip: !!s.flip, fmt: ['png', 'jpeg', 'webp'].includes(s.fmt) ? s.fmt : 'png', q: typeof s.q === 'number' ? clamp(s.q, 40, 100) : 92 };
 }
 
 /* ================= persistence ================= */
@@ -400,7 +466,7 @@ const kvGet = k => kv('readonly', s => s.get(k)).catch(() => undefined);
 const kvSet = (k, v) => kv('readwrite', s => s.put(v, k)).catch(() => {});
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {}
 let saveTimer;
-const saveSettings = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => kvSet('stack', state), 300); };
+const saveSettings = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => kvSet('stack', state), 300); pushHist(); };
 const touch = () => { if (state.mode === 'advanced' && state.preset) { state.preset = null; markSelected(); } saveSettings(); schedule(); };
 
 /* ================= source image ================= */
@@ -408,16 +474,17 @@ let srcBitmap = null, srcName = 'image', src = null;
 async function loadBlob(blob, name, persist = true) {
   let bmp; try { bmp = await createImageBitmap(blob); } catch (e) { alert('Could not read that image.'); return; }
   srcBitmap = bmp; srcName = (name || 'image').replace(/\.[^.]+$/, '');
-  if (persist) kvSet('image', { blob, name: srcName });
-  buildSrc(); $('#drop').hidden = true; $('#canvasWrap').hidden = false; $('#btnDownload').disabled = false; schedule(); if (state.mode === 'simple') buildThumbs();
+  if (persist) { kvSet('image', { blob, name: srcName }); state.rot = 0; state.flip = false; }
+  buildSrc(); $('#drop').hidden = true; $('#canvasWrap').hidden = false; $('#btnSave').disabled = false; schedule(); if (state.mode === 'simple') buildThumbs();
 }
 let srcVer = 0, cache = [];
 function buildSrc() {
   if (!srcBitmap) return;
   srcVer++; cache = [];
-  const sc = Math.min(1, state.maxDim / Math.max(srcBitmap.width, srcBitmap.height));
-  src = mk(Math.round(srcBitmap.width * sc), Math.round(srcBitmap.height * sc));
-  const c = src.getContext('2d'); c.imageSmoothingQuality = 'high'; c.drawImage(srcBitmap, 0, 0, src.width, src.height);
+  const sc = Math.min(1, state.maxDim / Math.max(srcBitmap.width, srcBitmap.height)), bw = Math.round(srcBitmap.width * sc), bh = Math.round(srcBitmap.height * sc);
+  const sw = state.rot % 180 ? bh : bw, sh = state.rot % 180 ? bw : bh;
+  src = mk(sw, sh); const c = src.getContext('2d'); c.imageSmoothingQuality = 'high';
+  c.translate(sw / 2, sh / 2); c.rotate(state.rot * Math.PI / 180); if (state.flip) c.scale(-1, 1); c.drawImage(srcBitmap, -bw / 2, -bh / 2, bw, bh);
 }
 function makeSample() {
   const c = mk(900, 600), g = c.getContext('2d'), sky = g.createLinearGradient(0, 0, 0, 600);
@@ -572,6 +639,11 @@ function paramEl(b, d) {
     i.addEventListener('change', () => { b.p[d.k] = i.checked; touch(); });
     return h('label', { class: 'check' }, i, d.label);
   }
+  if (d.t === 'color') {
+    const sw = h('button', { class: 'swatch', style: `background:${b.p[d.k]};width:46px;aspect-ratio:auto;height:34px;flex:none`, 'aria-label': d.label,
+      onclick: () => openColorPicker(b.p[d.k], hx => { b.p[d.k] = hx; sw.style.background = hx; touch(); }, d.label) });
+    return h('div', { class: 'row inline' }, h('label', { style: 'flex:1' }, d.label), sw);
+  }
   if (d.t === 'seed') return h('button', { class: 'btn small', style: 'align-self:flex-start', onclick: () => { b.p.seed = (Math.random() * 1e9) | 0; touch(); } }, '🎲 Reroll');
   if (d.t === 'palette') return paletteEditor(b, d.k);
 }
@@ -582,10 +654,21 @@ function blockEl(b, i) {
   tog.addEventListener('change', () => { b.on = tog.checked; card.classList.toggle('off', !b.on); touch(); });
   const move = d => () => { const j = i + d; if (j < 0 || j >= n) return; [state.blocks[i], state.blocks[j]] = [state.blocks[j], state.blocks[i]]; renderBlocks(); touch(); };
   const title = h('h2', { class: 'tap', onclick: () => { b.c = !b.c; card.classList.toggle('collapsed', b.c); saveSettings(); } }, h('span', { class: 'chev' }, '▾'), ` ${i + 1} · ${T.name}`);
+  const grip = h('button', { class: 'ib grip', title: 'Drag to reorder', 'aria-label': 'Drag to reorder' }, '⠿');
+  grip.addEventListener('pointerdown', e => {
+    e.preventDefault(); grip.setPointerCapture(e.pointerId); const y0 = e.clientY; card.classList.add('drag');
+    grip.onpointermove = ev => { card.style.transform = `translateY(${ev.clientY - y0}px)`; };
+    const end = ev => {
+      grip.onpointermove = grip.onpointerup = grip.onpointercancel = null; card.classList.remove('drag'); card.style.transform = '';
+      let to = 0; $$('#blocks .card').forEach((c, j) => { if (j !== i) { const r = c.getBoundingClientRect(); if (r.top + r.height / 2 < ev.clientY) to++; } });
+      if (to !== i) { const [bb] = state.blocks.splice(i, 1); state.blocks.splice(to, 0, bb); renderBlocks(); touch(); }
+    };
+    grip.onpointerup = grip.onpointercancel = end;
+  });
   card.append(h('header', {},
-    h('label', { class: 'sw-toggle' }, tog, h('span')), title,
-    h('button', { class: 'ib', title: 'Move up', 'aria-label': 'Move up', disabled: i === 0, onclick: move(-1) }, '▲'),
-    h('button', { class: 'ib', title: 'Move down', 'aria-label': 'Move down', disabled: i === n - 1, onclick: move(1) }, '▼'),
+    h('label', { class: 'sw-toggle' }, tog, h('span')), title, grip,
+    h('button', { class: 'ib mv', title: 'Move up', 'aria-label': 'Move up', disabled: i === 0, onclick: move(-1) }, '▲'),
+    h('button', { class: 'ib mv', title: 'Move down', 'aria-label': 'Move down', disabled: i === n - 1, onclick: move(1) }, '▼'),
     h('button', { class: 'ib', title: 'Duplicate', 'aria-label': 'Duplicate', onclick: () => { const c = JSON.parse(JSON.stringify(b)); c.id = uid(); state.blocks.splice(i + 1, 0, c); renderBlocks(); touch(); } }, '⧉'),
     h('button', { class: 'ib', title: 'Remove', 'aria-label': 'Remove', onclick: () => { state.blocks.splice(i, 1); renderBlocks(); touch(); } }, '✕')));
   card.append(h('div', { class: 'body' }, T.params.map(d => paramEl(b, d))));
@@ -634,7 +717,7 @@ function knobEl(paths, label) {
   const [first, ...rest] = targets, row = paramEl(first.b, { ...first.d, label: label || first.d.label });
   const ctl = row.matches('input,select') ? row : row.querySelector('input,select');
   const link = () => rest.forEach(t => { t.b.p[t.d.k] = t.d.t === 'range' ? Math.min(first.b.p[first.d.k], t.d.max) : first.b.p[first.d.k]; });
-  ['input', 'change'].forEach(ev => ctl.addEventListener(ev, link));
+  if (ctl && rest.length) ['input', 'change'].forEach(ev => ctl.addEventListener(ev, link));
   return row;
 }
 function renderSimple() {
@@ -698,14 +781,78 @@ const stage = $('#stage');
 ['dragleave', 'drop'].forEach(ev => stage.addEventListener(ev, e => { e.preventDefault(); $('#drop').classList.remove('over'); }));
 stage.addEventListener('drop', e => { const f = [...e.dataTransfer.files].find(f => f.type.startsWith('image/')); if (f) loadBlob(f, f.name); });
 document.addEventListener('paste', e => { const f = [...(e.clipboardData?.files || [])].find(f => f.type.startsWith('image/')); if (f) loadBlob(f, 'pasted'); });
-$('#btnDownload').addEventListener('click', () => out.toBlob(b => {
-  const a = h('a', { href: URL.createObjectURL(b), download: `${srcName}-styled.png` }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}, 'image/png'));
+/* ---- save / share ---- */
+const MIME = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp' };
+async function exportImage(share) {
+  const b = await new Promise(r => out.toBlob(r, MIME[state.fmt], state.q / 100));
+  if (!b) { alert('Could not export the image.'); return; }
+  const name = `${srcName}-styled.${{ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' }[b.type] || 'png'}`;
+  if (share) { try { await navigator.share({ files: [new File([b], name, { type: b.type })], title: 'Styled image' }); } catch (e) {} return; }
+  const a = h('a', { href: URL.createObjectURL(b), download: name }); document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+$('#btnSave').addEventListener('click', () => {
+  const fmt = h('select', {}, [['png', 'PNG (lossless)'], ['jpeg', 'JPEG (smaller)'], ['webp', 'WebP (smaller)']].map(([v, l]) => h('option', { value: v }, l))); fmt.value = state.fmt;
+  const qo = h('output', {}, state.q), q = h('input', { type: 'range', min: 40, max: 100, step: 1 }); q.value = state.q;
+  const qrow = h('div', { class: 'row' }, h('label', {}, 'Quality', qo), q), sync = () => { qrow.hidden = fmt.value === 'png'; };
+  fmt.addEventListener('change', () => { state.fmt = fmt.value; sync(); saveSettings(); });
+  q.addEventListener('input', () => { state.q = Number(q.value); qo.textContent = q.value; saveSettings(); });
+  sync();
+  const canShare = navigator.canShare && navigator.canShare({ files: [new File([''], 'a.png', { type: 'image/png' })] });
+  openSheet('Save image', h('div', { class: 'row', style: 'gap:14px' }, h('div', { class: 'row' }, h('label', {}, 'Format'), fmt), qrow,
+    h('div', { class: 'row inline' }, h('button', { class: 'btn primary', style: 'flex:1', onclick: () => { exportImage(false); closeSheet(); } }, 'Download'),
+      canShare ? h('button', { class: 'btn', style: 'flex:1', onclick: () => { closeSheet(); exportImage(true); } }, 'Share…') : null)));
+});
+
+/* ---- undo / redo ---- */
+let hist = [], hi = -1, histTimer, restoring = false;
+const snap = () => JSON.stringify({ ...state, fmt: '', q: 0, mode: '' }, (k, v) => k === 'id' ? undefined : v);
+function updUndo() { $('#btnUndo').disabled = hi <= 0; $('#btnRedo').disabled = hi >= hist.length - 1; }
+function commitHist() { clearTimeout(histTimer); const j = snap(); if (j === hist[hi]) return; hist = hist.slice(0, hi + 1); hist.push(j); if (hist.length > 60) hist.shift(); hi = hist.length - 1; updUndo(); }
+function pushHist() { if (restoring) return; clearTimeout(histTimer); histTimer = setTimeout(commitHist, 450); }
+function goHist(d) {
+  commitHist(); const t = hi + d; if (t < 0 || t >= hist.length) return; hi = t;
+  restoring = true; const prev = state, s = sanitize(JSON.parse(hist[hi])); if (!s) { restoring = false; return; }
+  s.mode = prev.mode; s.fmt = prev.fmt; s.q = prev.q; state = s;
+  renderBlocks(); $('#mixHost').replaceChildren(mixRow()); $('#maxDim').value = state.maxDim; markSelected();
+  if (prev.maxDim !== s.maxDim || prev.rot !== s.rot || prev.flip !== s.flip) { buildSrc(); } 
+  if (state.mode === 'simple') { renderSimple(); buildThumbs(); }
+  schedule(); saveSettings(); restoring = false; updUndo();
+}
+$('#btnUndo').addEventListener('click', () => goHist(-1));
+$('#btnRedo').addEventListener('click', () => goHist(1));
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey) || e.target.matches('input[type=text],input:not([type]),textarea')) return;
+  const k = e.key.toLowerCase();
+  if (k === 'z') { e.preventDefault(); goHist(e.shiftKey ? 1 : -1); } else if (k === 'y') { e.preventDefault(); goHist(1); }
+});
+
+/* ---- rotate / flip ---- */
+const reSrc = () => { buildSrc(); saveSettings(); schedule(); if (state.mode === 'simple') buildThumbs(); };
+$('#btnRotate').addEventListener('click', () => { state.rot = (state.rot + 90) % 360; reSrc(); });
+$('#btnFlip').addEventListener('click', () => { state.flip = !state.flip; reSrc(); });
+
+/* ---- install + offline ---- */
+let deferredInstall = null;
+function showInstall() {
+  const row = $('#installRow'); row.replaceChildren();
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (standalone) { row.hidden = true; return; }
+  if (deferredInstall) row.append(h('button', { class: 'btn small', onclick: async () => { deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; showInstall(); } }, 'Install app'), h('span', { class: 'hint' }, 'Adds it to your home screen.'));
+  else if (/iphone|ipad|ipod/i.test(navigator.userAgent)) row.append(h('span', { class: 'hint' }, 'To install: tap Share, then “Add to Home Screen”.'));
+  row.hidden = !row.childNodes.length;
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; showInstall(); });
+window.addEventListener('appinstalled', () => { deferredInstall = null; showInstall(); });
+showInstall();
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').then(() => navigator.serviceWorker.ready).then(() => { $('#pwaHint').textContent = '✓ Ready to work offline.'; }).catch(() => {});
+}
+
 
 /* ================= boot ================= */
 (async () => {
   const saved = sanitize(await kvGet('stack')); if (saved) state = saved;
-  syncAll();
+  syncAll(); hist = [snap()]; hi = 0; updUndo();
   looks = (await kvGet('looks')) || []; drawLooks();
   const img = await kvGet('image'); if (img && img.blob) loadBlob(img.blob, img.name, false);
 })();
